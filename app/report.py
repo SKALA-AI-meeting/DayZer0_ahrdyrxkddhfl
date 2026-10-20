@@ -18,6 +18,8 @@ NOT_USED = "사용하지 않음"
 
 
 def _minute_of(evidence_id: str, session_id: str) -> str:
+    if evidence_id.startswith("view:"):   # 문서 열람 기록
+        return clock.format_minute(float(evidence_id.split(":", 1)[1]))
     if evidence_id.startswith("m"):
         for m in store.list_messages(session_id):
             if f"m{m['id']}" == evidence_id:

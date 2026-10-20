@@ -88,3 +88,17 @@ def test_save_observation_rejects_bad_json():
         business.save_observation(sid, "책임감", "{깨진 json")
     business.save_observation(sid, "책임감", json.dumps({"a": 1}))
     assert business.list_observations(sid) == {"책임감": {"a": 1}}
+
+
+def test_doc_view_after_assistant_citation_counts_as_verification():
+    sid = store.create_session("x")
+    store.add_message(sid, "assistant", "candidate", "재참여율 요약해 줘", 20)
+    store.add_message(sid, "assistant", "assistant", "재참여율은 22%입니다. 참고: 지표 현황", 20)
+    store.add_doc_view(sid, "metrics", 10)        # 답보다 먼저 연 건 인정하지 않음
+    assert observe.cross_checked_docs(sid, store.list_messages(sid, channels=("assistant",))) == []
+    store.add_doc_view(sid, "metrics", 21.5)      # 답 이후에 직접 열어 봄
+    checks = observe.cross_checked_docs(sid, store.list_messages(sid, channels=("assistant",)))
+    assert checks[0]["verified"] and "지표 현황" in checks[0]["behavior"]
+    body = report.build_body(sid, [{"element": "AI 활용", "situation": "세션 전체", "used": True,
+                                    "requests": [], "checks": checks}])
+    assert body["sections"][0]["observed"][0]["when"] == "00:21"

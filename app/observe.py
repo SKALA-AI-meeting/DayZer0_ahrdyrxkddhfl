@@ -21,7 +21,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from app import clock, llm, store
+from app import clock, docs, llm, store
 from app.settings import PART_TITLES, config, observation_spec, prompt
 
 JUDGE_VERSION = "v1"   # 판별 프롬프트·형식을 바꾸면 올린다(캐시 무효화)
@@ -208,15 +208,41 @@ async def observe_ai_use(session_id: str, mode: str = "hybrid", use_cache: bool 
             sim = _best_similarity(m["content"], plan)
             reuse.append({"request_id": f"m{req['id']}", "minute": req["minute"],
                           "request": req["content"], "reuse": classify_reuse(sim)})
+    doc_checks = cross_checked_docs(session_id, log)
     if mode == "rules":
-        return {**base, "used": True, "requests": reuse, "checks": []}
+        return {**base, "used": True, "requests": reuse, "checks": doc_checks}
 
     answers = await _judge(session_id, spec["situation"], spec["checks"],
                            _format(log, plan), "AI 어시스턴트 대화 기록과 지원자 기획안이다.", use_cache)
     evidence = {f"m{m['id']}": m["content"] for m in requests}
     evidence.update({f"plan:{k}": v for k, v in plan.items()})
     scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
-    return {**base, "used": True, "requests": reuse, "checks": verify(answers, evidence, scopes)}
+    return {**base, "used": True, "requests": reuse,
+            "checks": verify(answers, evidence, scopes) + doc_checks}
+
+
+def cross_checked_docs(session_id: str, log: list[dict]) -> list[dict]:
+    """규칙: 어시스턴트가 근거로 든 문서를 지원자가 그 답 이후에 직접 열어 봤는가(결과 검증).
+
+    LLM 판단 없이 열람 기록(doc_views)으로 확정한다. 근거 id는 "view:<분>" 형식.
+    """
+    company = store.get_session(session_id)["company"]
+    titles = {d["id"]: d["title"] for d in docs.all_docs(company)}
+    views = store.doc_views(session_id)
+    out, seen = [], set()
+    for m in log:
+        if m["sender"] != "assistant":
+            continue
+        for doc_id, title in titles.items():
+            if title not in m["content"] or doc_id in seen:
+                continue
+            hit = next((v for v in views if v["doc_id"] == doc_id and v["minute"] >= m["minute"]), None)
+            if hit:
+                seen.add(doc_id)
+                out.append({"check_id": "verified_doc_view", "answer": "yes", "verified": True,
+                            "evidence_id": f"view:{hit['minute']}", "quote": f"'{title}' 문서 열람",
+                            "behavior": f"AI 어시스턴트가 근거로 든 '{title}' 문서를 직접 열어 확인함"})
+    return out
 
 
 async def observe_session(session_id: str, mode: str = "hybrid", use_cache: bool = True) -> list[dict]:
