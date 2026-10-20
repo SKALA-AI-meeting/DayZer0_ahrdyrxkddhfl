@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 
 type Doc = { id: string; title: string; source: string };
 type Req = { request_id: string; doc_id: string; title: string; body: string; masked_count: number; status: string };
-const REQ_LABEL: Record<string, string> = { waiting: "승인 대기", registered: "등록됨", rejected: "거절됨" };
+const REQ_LABEL: Record<string, string> = { waiting: "승인 대기", registered: "등록됨", rejected: "거절됨", failed: "등록 실패" };
 
 export default function DocAdmin() {
   const [docs, setDocs] = useState<Doc[]>([]);

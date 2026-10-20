@@ -83,15 +83,41 @@ def doc_tool_specs(include_plan: bool = False) -> list[StructuredTool]:
             for name, desc, fields in specs]
 
 
+def check_result(result) -> str:
+    """MCP 도구 결과를 텍스트로 바꾸고, 도구가 실패했으면 예외로 올린다.
+
+    MCP 오류는 예외가 아니라 "Error executing tool …" 텍스트로 돌아오므로, 코드가 직접 부르는
+    변경 도구(보드 반영·관찰 저장·문서 등록)는 이 검사를 거쳐야 실패를 성공으로 착각하지 않는다.
+
+    Raises:
+        RuntimeError: 도구 실행이 실패한 경우.
+    """
+    if isinstance(result, list):
+        text = "\n".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in result)
+    else:
+        text = str(result)
+    if text.lstrip().startswith("Error executing tool"):
+        raise RuntimeError(text.strip())
+    return text
+
+
 async def call_rag(tool_name: str, args: dict) -> str:
-    """rag-mcp 도구를 코드에서 직접 호출한다 (예: 승인 후 register_company_doc)."""
+    """rag-mcp 도구를 코드에서 직접 호출한다 (예: 승인 후 register_company_doc).
+
+    Raises:
+        RuntimeError: 도구 실행이 실패한 경우.
+    """
     async with _client().session("rag") as session:
         tools = {t.name: t for t in await load_mcp_tools(session)}
-        return await tools[tool_name].ainvoke(args)
+        return check_result(await tools[tool_name].ainvoke(args))
 
 
 async def call_business(tool_name: str, args: dict) -> str:
-    """business-mcp 도구를 코드에서 직접 호출한다 (예: 분업 확정 후 assign_tasks)."""
+    """business-mcp 도구를 코드에서 직접 호출한다 (예: 분업 확정 후 assign_tasks).
+
+    Raises:
+        RuntimeError: 도구 실행이 실패한 경우.
+    """
     async with _client().session("business") as session:
         tools = {t.name: t for t in await load_mcp_tools(session)}
-        return await tools[tool_name].ainvoke(args)
+        return check_result(await tools[tool_name].ainvoke(args))

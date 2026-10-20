@@ -10,6 +10,7 @@
 - 체크포인터에 thread_id(=요청 id)별로 상태를 저장해, 승인 요청이 다른 HTTP 요청으로 와도 이어진다.
   MVP는 메모리 체크포인터라 서버를 재시작하면 대기 중 요청은 사라진다(README에 기록).
 """
+import logging
 import re
 import uuid
 from typing import TypedDict
@@ -21,6 +22,7 @@ from langgraph.types import Command, interrupt
 from app import approval, store
 from app.mcp_client import call_rag
 
+log = logging.getLogger("dayzero.doc_graph")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 PHONE = re.compile(r"\b01[016789][-\s]?\d{3,4}[-\s]?\d{4}\b")
 DOC_ID = re.compile(r"[a-z0-9_-]{2,40}")
@@ -69,11 +71,14 @@ def after_approval(state: DocState) -> str:
 async def register(state: DocState) -> DocState:
     """승인된 내용에만 토큰을 발급해 rag-mcp 변경 도구를 부른다."""
     token = approval.issue(state["request_id"], state["company"], state["doc_id"], state["body"])
-    result = await call_rag("register_company_doc", {
-        "request_id": state["request_id"], "company": state["company"], "doc_id": state["doc_id"],
-        "title": state["title"], "body": state["body"], "approval_token": token})
-    text = str(result)
-    status = "rejected" if "Error" in text else "registered"
+    try:
+        await call_rag("register_company_doc", {
+            "request_id": state["request_id"], "company": state["company"], "doc_id": state["doc_id"],
+            "title": state["title"], "body": state["body"], "approval_token": token})
+        status = "registered"
+    except RuntimeError as exc:   # 도구가 거부·실패하면 성공으로 기록하지 않는다(원인은 로그에)
+        log.error("문서 등록 실패: request=%s %s", state["request_id"], exc)
+        status = "failed"
     store.set_doc_request_status(state["request_id"], status)
     return {"result": status}
 
