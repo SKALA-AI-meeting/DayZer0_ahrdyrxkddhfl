@@ -70,6 +70,8 @@ async def send_message(session_id: str, channel: str, text: str, now: float | No
         role = "coworker" if channel == "dm" else "lead"
         store.add_message(session_id, channel, role, guard.notice(), minute)
         return
+    if channel == "dm" and await start_split_early(session_id, text, minute):
+        return
     try:
         await graph.run_turn(session_id, minute, {"kind": "candidate", "channel": channel, "text": text})
     except Exception:   # 재시도 후에도 실패: 500 대신 정해진 문장으로 답하고 원인은 로그에 남긴다(PRD A.4)
@@ -77,6 +79,30 @@ async def send_message(session_id: str, channel: str, text: str, now: float | No
         role = "coworker" if channel == "dm" else "lead"
         store.add_message(session_id, channel, role,
                           settings.config()["verify"]["llm_failure_reply"], minute)
+
+
+async def start_split_early(session_id: str, text: str, minute: float) -> bool:
+    """분업 장면 전에 지원자가 먼저 분담을 꺼내면 분업 장면(F-21)을 지금 실행한다.
+
+    00:10은 "흐름용" 시점이라(F-23 이벤트 4개가 아님) 앞당겨도 PRD 내용(동료가 분담안 제안 → 수락·조정)은 같다.
+    장면 실행 기록을 남기므로 00:10에 같은 분담안을 다시 말하지 않고, 이후 답은 분업 단계로 처리된다.
+
+    Returns:
+        분업 장면을 실행했으면 True.
+    """
+    s = store.get_session(session_id)
+    phrases = settings.config()["negotiation"]["split_request_phrases"]
+    if s["phase"] != "waiting" or not any(p in text for p in phrases):
+        return False
+    if not store.claim_scene(session_id, "negotiate", minute):
+        return False   # 이미 실행됐거나 다른 요청이 실행 중
+    try:
+        await graph.run_turn(session_id, minute, {"kind": "scene", "scene_id": "negotiate"})
+    except Exception:   # 실패하면 실행 표시를 지워 00:10에 정상 실행되게 하고, 이번 메시지는 일반 답장으로 처리
+        store.unclaim_scene(session_id, "negotiate")
+        log.exception("분업 장면 앞당겨 실행 실패: session=%s", session_id)
+        return False
+    return True
 
 
 async def ask_assistant(session_id: str, text: str, now: float | None = None) -> str:

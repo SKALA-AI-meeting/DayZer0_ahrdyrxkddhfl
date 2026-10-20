@@ -174,3 +174,26 @@ def test_delayed_doc_release_is_announced_once():
     engine.announce_shared_docs(sid, 67)
     notices = [m["content"] for m in store.list_messages(sid) if m["sender"] == "system"]
     assert notices == ["'사용자 인터뷰 요약' 문서가 공유됐어요. 이제 회사 문서에서 열어 볼 수 있습니다."]
+
+
+# 회귀: 지원자가 00:10 전에 분담을 꺼내 동의했는데 분업 단계 전이라 동의로 처리되지 않았고,
+# 00:10 장면과 00:30 확정 메시지로 분담안이 세 번 나갔다 → 그때 분업 장면을 시작한다
+def test_candidate_can_start_split_before_scene(monkeypatch):
+    from app import engine, graph
+    triggers = []
+
+    async def fake_run_turn(sid, minute, trigger):
+        triggers.append(trigger)
+        if trigger.get("scene_id") == "negotiate":
+            store.update_session(sid, phase="negotiate")
+    monkeypatch.setattr(graph, "run_turn", fake_run_turn)
+    sid = store.create_session("x")
+    for scene in ("kickoff", "kickoff_greeting"):
+        store.claim_scene(sid, scene, 0)
+    asyncio.run(engine.send_message(sid, "dm", "안녕하세요, 업무 배분부터 시작할까요?", now=1000.0))
+    assert triggers[-1] == {"kind": "scene", "scene_id": "negotiate"} and "negotiate" in store.run_scene_ids(sid)
+    asyncio.run(engine.send_message(sid, "dm", "네 좋습니다!", now=1001.0))
+    assert triggers[-1]["kind"] == "candidate"            # 동의는 분업 단계 답으로 처리(장면 반복 없음)
+    other = store.create_session("y")
+    asyncio.run(engine.send_message(other, "dm", "안녕하세요 잘 부탁드려요", now=1000.0))
+    assert "negotiate" not in store.run_scene_ids(other)  # 분담 이야기가 아니면 그대로
