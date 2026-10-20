@@ -214,3 +214,54 @@ def test_summary_hidden_when_verification_keeps_failing(monkeypatch):
         return Out()
     monkeypatch.setattr(report.llm, "ainvoke", fake)
     assert asyncio.run(report.summarize_section("x", _section())) is None
+
+
+# 판별기가 일부 체크에 답하지 않으면 그 체크만 다시 묻고, 그래도 없으면 '답하지 않음'으로 기록한다
+CHECKS = [{"id": "helped", "question": "도왔나?"}, {"id": "scheduled", "question": "일정을 제안했나?"},
+          {"id": "declined", "question": "거절했나?"}]
+
+
+def _fake_judge(monkeypatch, replies):
+    asked = []
+
+    async def fake(model, messages, node, sid=""):
+        asked.append([line[2:].split(":")[0] for line in messages[1].content.splitlines() if line.startswith("- ")])
+        return observe.Judgement(answers=replies.pop(0))
+    monkeypatch.setattr(observe.llm, "ainvoke", fake)
+    return asked
+
+
+def test_judge_reasks_only_missing_checks(monkeypatch):
+    asked = _fake_judge(monkeypatch, [
+        [CheckAnswer(check_id="helped", answer="yes", evidence_id="m1", quote="같이 봐요"),
+         CheckAnswer(check_id="made_up", answer="yes")],                       # scheduled·declined 누락 + 없는 id
+        [CheckAnswer(check_id="scheduled", answer="no"), CheckAnswer(check_id="declined", answer="no")]])
+    answers, missing = asyncio.run(observe._judge("s", "상황", CHECKS, "기록", "", use_cache=False))
+    assert asked == [["helped", "scheduled", "declined"], ["scheduled", "declined"]]
+    assert [a.check_id for a in answers] == ["helped", "scheduled", "declined"] and not missing
+
+
+def test_judge_records_checks_still_missing(monkeypatch):
+    _fake_judge(monkeypatch, [[CheckAnswer(check_id="helped", answer="no")]] * 2)
+    answers, missing = asyncio.run(observe._judge("s", "상황", CHECKS, "기록", "", use_cache=False))
+    assert missing == {"scheduled", "declined"} and all(a.answer == "no" for a in answers)
+    marked = observe._mark_missing(observe.verify(answers, {}), missing)
+    assert {c["check_id"]: c.get("dropped_reason") for c in marked} == {
+        "helped": None, "scheduled": observe.MISSING_REASON, "declined": observe.MISSING_REASON}
+
+
+def test_judge_ignores_incomplete_old_cache(monkeypatch):
+    asked = _fake_judge(monkeypatch, [[CheckAnswer(check_id=c["id"], answer="no") for c in CHECKS]])
+    human_key = None
+    real_put = store.cache_put
+
+    def spy_put(key, value):
+        nonlocal human_key
+        human_key = key
+        real_put(key, value)
+    monkeypatch.setattr(observe.store, "cache_put", spy_put)
+    asyncio.run(observe._judge("s", "상황", CHECKS, "기록-캐시", "", use_cache=True))
+    real_put(human_key, {"answers": [{"check_id": "helped", "answer": "yes"}]})   # 예전 형식: 체크가 빠진 캐시
+    _fake_judge(monkeypatch, [[CheckAnswer(check_id=c["id"], answer="no") for c in CHECKS]])
+    answers, _ = asyncio.run(observe._judge("s", "상황", CHECKS, "기록-캐시", "", use_cache=True))
+    assert len(answers) == 3 and len(asked) == 1

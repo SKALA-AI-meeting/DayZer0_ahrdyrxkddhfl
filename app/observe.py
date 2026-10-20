@@ -129,25 +129,58 @@ def _with_points(checks: list[dict], spec_checks: list[dict]) -> list[dict]:
 
 # ---------- LLM 판별 ----------
 
+MISSING_REASON = "판별기가 답하지 않음"
+
+
 async def _judge(session_id: str, situation: str, checks: list[dict], transcript: str,
-                 hint: str, use_cache: bool) -> list[CheckAnswer]:
+                 hint: str, use_cache: bool) -> tuple[list[CheckAnswer], set[str]]:
+    """체크리스트를 판별한다. 판별기가 빠뜨린 체크는 그 체크만 다시 묻는다.
+
+    Returns:
+        (체크마다 하나씩의 답, 다시 물어도 답이 없던 체크 id). 답이 없던 체크는 "no"로 채운다.
+    """
     cfg = config()
     scope_note = {"messages": " [근거는 지원자 메시지(id=m…)에서만. 기획안 인용 금지]",
                   "plan": " [근거는 지원자 기획안(id=plan:…)에서만]"}
-    questions = "\n".join(f"- {c['id']}: {c['question']}{scope_note.get(c.get('evidence_scope'), '')}"
-                          for c in checks)
-    human = (f"상황: {situation}\n\n확인할 질문:\n{questions}\n\n{hint}\n\n기록:\n{transcript}\n\n"
-             "질문마다 하나씩 답하라. 근거는 '지원자' 메시지나 기획안에서만 인용한다.")
+
+    def ask(subset: list[dict]) -> str:
+        questions = "\n".join(f"- {c['id']}: {c['question']}{scope_note.get(c.get('evidence_scope'), '')}"
+                              for c in subset)
+        return (f"상황: {situation}\n\n확인할 질문:\n{questions}\n\n{hint}\n\n기록:\n{transcript}\n\n"
+                "질문마다 하나씩 답하라. 근거는 '지원자' 메시지나 기획안에서만 인용한다.")
+
+    human = ask(checks)
     key = hashlib.sha256(json.dumps([JUDGE_VERSION, cfg["llm"]["model"], prompt("judge"), human],
                                     ensure_ascii=False).encode()).hexdigest()
-    if use_cache and (cached := store.cache_get(key)) is not None:
-        return [CheckAnswer(**a) for a in cached["answers"]]
+    ids = [c["id"] for c in checks]
+    cached = store.cache_get(key) if use_cache else None
+    # 이 처리 전에 저장된 캐시는 체크가 빠져 있을 수 있다. 모든 체크가 있을 때만 쓴다.
+    if cached is not None and {a["check_id"] for a in cached["answers"]} >= set(ids):
+        return [CheckAnswer(**a) for a in cached["answers"]], set(cached.get("missing", []))
     model = llm.chat_model(cfg["llm"]["judge_temperature"]).with_structured_output(
         Judgement, method="function_calling")
-    result: Judgement = await llm.ainvoke(
-        model, [SystemMessage(prompt("judge")), HumanMessage(human)], "observe.judge", session_id)
-    store.cache_put(key, result.model_dump())
-    return result.answers
+    got: dict[str, CheckAnswer] = {}
+    pending = checks
+    for attempt in range(cfg["observation"]["judge_missing_retries"] + 1):
+        result: Judgement = await llm.ainvoke(
+            model, [SystemMessage(prompt("judge")), HumanMessage(ask(pending))], "observe.judge", session_id)
+        for a in result.answers:   # 묻지 않은 id·중복 답은 버린다
+            if a.check_id in ids and a.check_id not in got:
+                got[a.check_id] = a
+        pending = [c for c in checks if c["id"] not in got]
+        if not pending:
+            break
+        llm.trace({"session": session_id, "node": "observe.judge.missing", "attempt": attempt + 1,
+                   "missing": [c["id"] for c in pending]})
+    missing = {c["id"] for c in pending}
+    answers = [got.get(i) or CheckAnswer(check_id=i, answer="no") for i in ids]
+    store.cache_put(key, {"answers": [a.model_dump() for a in answers], "missing": sorted(missing)})
+    return answers, missing
+
+
+def _mark_missing(checks: list[dict], missing: set[str]) -> list[dict]:
+    """다시 물어도 답이 없던 체크에 이유를 남긴다(리포트에는 근거로 쓰이지 않고 내부 기록에만 남음)."""
+    return [{**c, "dropped_reason": MISSING_REASON} if c["check_id"] in missing else c for c in checks]
 
 
 def _format(messages: list[dict], plan: dict[str, str] | None, pack: str | None = None) -> str:
@@ -184,12 +217,13 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
 
     hint = ("참고: 키워드 후보 메시지 id = " + ", ".join(f"m{i}" for i in sorted(hits))
             + " (후보일 뿐이다. 다른 메시지도 모두 본다)") if hits else "키워드 후보 없음. 모든 메시지를 본다."
-    answers = await _judge(session_id, spec["situation"], spec["checks"],
-                           _format(messages, plan, store.get_session(session_id)["scenario"]), hint, use_cache)
+    answers, missing = await _judge(session_id, spec["situation"], spec["checks"],
+                                    _format(messages, plan, store.get_session(session_id)["scenario"]), hint, use_cache)
     evidence = _evidence_texts(messages, plan or {})
     scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
     required = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
-    return {**base, "happened": True, "checks": _with_points(verify(answers, evidence, scopes, required), spec["checks"])}
+    checks = _mark_missing(verify(answers, evidence, scopes, required), missing)
+    return {**base, "happened": True, "checks": _with_points(checks, spec["checks"])}
 
 
 # ---------- AI 활용 ----------
@@ -238,13 +272,13 @@ async def observe_ai_use(session_id: str, mode: str = "hybrid", use_cache: bool 
     if mode == "rules":
         return {**base, "used": True, "requests": reuse, "checks": doc_checks}
 
-    answers = await _judge(session_id, spec["situation"], spec["checks"],
-                           _format(log, plan, pack), "AI 어시스턴트 대화 기록과 지원자 기획안이다.", use_cache)
+    answers, missing = await _judge(session_id, spec["situation"], spec["checks"],
+                                    _format(log, plan, pack), "AI 어시스턴트 대화 기록과 지원자 기획안이다.", use_cache)
     evidence = {f"m{m['id']}": m["content"] for m in requests}
     evidence.update({f"plan:{k}": v for k, v in plan.items()})
     scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
     return {**base, "used": True, "requests": reuse,
-            "checks": _with_points(verify(answers, evidence, scopes), spec["checks"]) + doc_checks}
+            "checks": _with_points(_mark_missing(verify(answers, evidence, scopes), missing), spec["checks"]) + doc_checks}
 
 
 def cross_checked_docs(session_id: str, log: list[dict]) -> list[dict]:
