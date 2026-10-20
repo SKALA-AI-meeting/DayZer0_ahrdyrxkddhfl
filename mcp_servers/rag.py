@@ -7,17 +7,20 @@
 - 문서 공개 시각(F-15)을 서버가 직접 검사한다. session_minute·company는 모델이 아니라
   에이전트 코드가 채워 넣는다(app/mcp_client.py) → 모델이 값을 바꿔 미리 읽을 수 없다.
 
-PRD 부록의 BGE-M3 벡터 검색 대신 키워드 검색을 쓴다(문서 수가 적어 충분, README에 기록).
+검색은 config [rag].search_mode: vector(미리 색인한 임베딩 유사도, app/embedding.py) 또는 keyword.
+vector에서 임베딩 호출이 실패하면 keyword로 대신 찾는다(Recovery). 결과마다 via로 방식을 밝힌다.
 실행: uv run python -m mcp_servers.rag
 """
+import logging
 import re
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from app import approval, clock, docs, settings, store
+from app import approval, clock, docs, embedding, settings, store
 
 mcp = FastMCP("dayzero-rag")
+log = logging.getLogger("dayzero.rag")   # stdio 서버라 stdout에 쓰지 않는다(로그는 stderr)
 READ = ToolAnnotations(readOnlyHint=True)
 
 
@@ -52,17 +55,14 @@ def search_company_docs(query: str, session_minute: float, company: str = "") ->
         raise ValueError("검색어가 비어 있습니다. 2글자 이상 단어를 넣어 주세요.")
     rag_cfg = settings.config()["rag"]
     open_docs = docs.available(company, session_minute)
-    hits = []
-    for doc in open_docs:
-        # 질문이 문서를 지목하면("인터뷰 요약에서…") 그 문서를 우선한다.
-        title_bonus = _score(tokens, doc["title"]) * rag_cfg["title_match_weight"]
-        for para in docs.body(company, doc["id"]).split("\n\n"):
-            score = _score(tokens, para)
-            if score:
-                hits.append((score + title_bonus, doc, para.strip()))
-    hits.sort(key=lambda h: h[0], reverse=True)
-    results = [{"doc_id": d["id"], "title": d["title"], "excerpt": p}
-               for _, d, p in hits[:rag_cfg["top_k"]]]
+    results = None
+    if rag_cfg["search_mode"] == "vector":
+        try:
+            results = _vector_search(query, tokens, company, open_docs, rag_cfg)
+        except Exception:   # 임베딩 실패 시 키워드 검색으로 대신 찾는다(원인은 stderr 로그)
+            log.exception("벡터 검색 실패, 키워드 검색으로 대체")
+    if results is None:
+        results = _keyword_search(tokens, company, open_docs, rag_cfg)
     # 아직 공개되지 않은 문서를 지목한 검색이면, 다른 문서로 대신 답하지 않도록 사실을 알린다.
     open_ids = {d["id"] for d in open_docs}
     for doc in docs.all_docs(company):
@@ -70,6 +70,33 @@ def search_company_docs(query: str, session_minute: float, company: str = "") ->
             results.insert(0, {"doc_id": doc["id"], "title": doc["title"],
                                "notice": f"'{doc['title']}' 문서는 아직 공유되지 않았습니다."})
     return results
+
+
+def _vector_search(query: str, tokens: list[str], company: str, open_docs: list[dict],
+                   rag_cfg: dict) -> list[dict]:
+    """미리 색인한 임베딩으로 공개된 문서의 문단을 찾는다. 질문이 제목을 지목하면 가중치를 더한다."""
+    titles = {d["id"]: d["title"] for d in open_docs}
+    hits = embedding.search(query, company, set(titles))
+    for h in hits:
+        if _score(tokens, titles[h["doc_id"]]):
+            h["score"] += rag_cfg["vector_title_bonus"]
+    hits.sort(key=lambda h: h["score"], reverse=True)
+    return [{"doc_id": h["doc_id"], "title": titles[h["doc_id"]], "excerpt": h["text"],
+             "score": round(h["score"], 3), "via": "vector"} for h in hits[:rag_cfg["top_k"]]]
+
+
+def _keyword_search(tokens: list[str], company: str, open_docs: list[dict], rag_cfg: dict) -> list[dict]:
+    """키워드 일치 수로 문단을 찾는다. 질문이 문서를 지목하면("인터뷰 요약에서…") 그 문서를 우선한다."""
+    hits = []
+    for doc in open_docs:
+        title_bonus = _score(tokens, doc["title"]) * rag_cfg["title_match_weight"]
+        for para in docs.body(company, doc["id"]).split("\n\n"):
+            score = _score(tokens, para)
+            if score:
+                hits.append((score + title_bonus, doc, para.strip()))
+    hits.sort(key=lambda h: h[0], reverse=True)
+    return [{"doc_id": d["id"], "title": d["title"], "excerpt": p, "via": "keyword"}
+            for _, d, p in hits[:rag_cfg["top_k"]]]
 
 
 @mcp.tool(annotations=READ)
@@ -95,6 +122,7 @@ def register_company_doc(request_id: str, company: str, doc_id: str, title: str,
     if not re.fullmatch(r"[a-z0-9_-]{2,40}", doc_id):
         raise ValueError("doc_id는 영문 소문자·숫자·-·_ 2~40자여야 합니다.")
     store.upsert_company_doc(company, doc_id, title, body)
+    # 색인은 다음 벡터 검색 때 내용 해시를 비교해 바뀐 문서만 다시 만든다(embedding.ensure_index)
     return {"ok": True, "doc_id": doc_id, "title": title}
 
 

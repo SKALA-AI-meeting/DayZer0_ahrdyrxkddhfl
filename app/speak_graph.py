@@ -8,6 +8,7 @@ AI가 만든 문장을 그대로 내보내지 않고, 코드가 검증한 뒤 �
                                       └─ 실패 + 한도 초과 → fallback → END     (안전한 대체 문장)
 
 verify가 검사하는 것 (모두 코드, LLM 아님):
+- 찾아보지도 않고 포기: "제공할 수 없습니다"라면서 이번 답에서 도구를 한 번도 부르지 않음
 - 검토 요청 무시: 기획안 검토를 부탁받았는데 공유 문서(read_shared_plan)를 읽지 않음
 - 말만 하고 실행 안 함: "확인해 볼게요"라고 하면서 이번 답에서 도구를 한 번도 부르지 않음
 - 판정 발언(F-24): 합격·평가 결과·연출 같은 금지 표현
@@ -144,6 +145,8 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
             return f"missing:{options[0]}"
     if use_tools and required_tool and required_tool not in (called_tools or []):
         return "not_read"   # 검토를 부탁받았는데 공유 문서를 실제로 읽지 않음
+    if use_tools and tools_used == 0 and any(p in text for p in config()["verify"]["no_lookup_phrases"]):
+        return "no_lookup"  # 찾아보지도 않고 모른다·못 준다고 답함
     if use_tools and tools_used == 0 and any(p in text for p in config()["verify"]["deferral_phrases"]):
         return "deferral"   # 확인하겠다고 말만 하고 이번 답에서 도구를 부르지 않음
     if use_tools:
@@ -176,6 +179,8 @@ FEEDBACK = {
     "missing": "방금 답에 반드시 전달해야 할 내용 '{x}'이(가) 빠졌다. 빠짐없이 넣어 다시 써라.",
     "not_read": "지원자가 기획안 검토를 부탁했는데 공유 문서를 읽지 않았다. read_shared_plan으로 읽은 뒤, "
                 "지원자 파트에 대한 구체적인 의견을 1~2개 주어라(회사 문서 근거가 있으면 함께). 대신 써 주지는 마라.",
+    "no_lookup": "찾아보지 않고 답할 수 없다고 했다. 회사 문서를 먼저 검색해 보고, 찾은 내용으로 답하라. "
+                 "찾아봐도 없으면 그때 없다고 말하라.",
     "deferral": "확인하겠다고만 하고 실제로 확인하지 않았다. 지금 도구를 호출해 확인한 뒤, 확인한 내용으로 바로 답하라.",
     "citation": "방금 답에서 '{x}' 문서를 근거로 들었지만 이번에 그 문서를 읽지 않았다. "
                 "도구로 확인하거나, 확인하지 않은 문서는 언급하지 말고 다시 써라.",

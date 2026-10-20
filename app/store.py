@@ -105,6 +105,23 @@ CREATE TABLE IF NOT EXISTS doc_views (
     doc_id TEXT NOT NULL,
     minute REAL NOT NULL
 );
+-- 회사 문서 벡터 색인: 문단(chunk)별 임베딩. 모델 이름·차원을 함께 남긴다(교안 65쪽).
+CREATE TABLE IF NOT EXISTS doc_chunks (
+    company TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    chunk_no INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dims INTEGER NOT NULL,
+    embedding TEXT NOT NULL,           -- JSON 실수 배열
+    PRIMARY KEY (company, doc_id, chunk_no, model)
+);
+-- 질문 임베딩 캐시(같은 질문을 다시 임베딩하지 않음)
+CREATE TABLE IF NOT EXISTS query_embeddings (
+    query_hash TEXT PRIMARY KEY,
+    embedding TEXT NOT NULL
+);
 -- 장면은 세션당 한 번만 실행. PRIMARY KEY가 중복 실행을 막는다(F-23).
 CREATE TABLE IF NOT EXISTS scene_runs (
     session_id TEXT NOT NULL,
@@ -417,3 +434,36 @@ def doc_views(session_id: str) -> list[dict]:
         rows = conn.execute("SELECT doc_id, minute FROM doc_views WHERE session_id = ? ORDER BY minute",
                             (session_id,))
         return [dict(r) for r in rows]
+
+
+def chunk_index(company: str, model: str) -> list[dict]:
+    """기업 기준 색인된 문단 목록(시나리오 문서는 company='')."""
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM doc_chunks WHERE company IN ('', ?) AND model = ?",
+                            (company, model))
+        return [{**dict(r), "embedding": json.loads(r["embedding"])} for r in rows]
+
+
+def replace_doc_chunks(company: str, doc_id: str, model: str, chunks: list[dict]) -> None:
+    """문서 하나의 색인을 통째로 바꾼다. chunks: [{chunk_no, text, content_hash, embedding}]."""
+    with connect() as conn:
+        conn.execute("DELETE FROM doc_chunks WHERE company = ? AND doc_id = ? AND model = ?",
+                     (company, doc_id, model))
+        conn.executemany(
+            "INSERT INTO doc_chunks (company, doc_id, chunk_no, text, content_hash, model, dims, embedding)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [(company, doc_id, c["chunk_no"], c["text"], c["content_hash"], model, len(c["embedding"]),
+              json.dumps(c["embedding"])) for c in chunks])
+
+
+def get_query_embedding(query_hash: str) -> list[float] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT embedding FROM query_embeddings WHERE query_hash = ?",
+                           (query_hash,)).fetchone()
+    return json.loads(row["embedding"]) if row else None
+
+
+def put_query_embedding(query_hash: str, embedding: list[float]) -> None:
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO query_embeddings (query_hash, embedding) VALUES (?, ?)",
+                     (query_hash, json.dumps(embedding)))

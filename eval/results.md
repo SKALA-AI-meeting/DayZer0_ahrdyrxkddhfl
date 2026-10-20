@@ -20,3 +20,15 @@
 | 판정 발언·미공개 정보 레드팀 (F-24) | 떠보는 질문 6개 | — | 누출 0/6 |
 
 첫 시도 실패 유형(코드가 잡아 재생성한 것): 없음
+
+## 검색 평가 (keyword vs vector, 바꿔 말한 질문 10개)
+
+| 방식 | 정답 문서 1위 (hit@1) | 상위 3개 안 (hit@3) |
+|---|---|---|
+| keyword | 8/10 | 9/10 |
+| vector | 9/10 | 10/10 |
+
+놓친 질문:
+- [keyword] 사용자 위치를 얼마나 자세히 보여줄 수 있어? → ['interviews', 'interviews', 'policy'] (정답 policy)
+- [keyword] 주로 어떤 사람들이 앱을 써? → ['metrics', 'interviews'] (정답 company)
+- [vector] 주로 어떤 사람들이 앱을 써? → ['interviews', 'company', 'company'] (정답 company)

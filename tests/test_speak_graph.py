@@ -78,3 +78,9 @@ def test_progress_events_follow_nodes():
     assert progress.get("s1") == [{"actor": "coworker", "label": "답을 확인하는 중", "node": "verify"}]
     sg.done_node({"session_id": "s1", "node": "persona.coworker", "text": "네"})
     assert progress.get("s1") == []
+
+
+def test_giving_up_without_lookup_is_no_lookup():
+    text = "죄송하지만 그 정보는 제공할 수 없습니다."
+    assert sg.check(text, [], [], True, tools_used=0) == "no_lookup"
+    assert sg.check(text, [], [], True, tools_used=1) == "ok"      # 찾아보고도 없으면 그렇게 말해도 됨
