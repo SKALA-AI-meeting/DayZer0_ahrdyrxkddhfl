@@ -330,3 +330,23 @@ def test_dropped_checks_are_reasked_with_reason(monkeypatch):
     assert got["helped"]["verified"] and got["helped"]["evidence_id"] == f"m{me}"
     assert got["scheduled"]["answer"] == "no" and got["declined"]["answer"] == "no"
     assert len(asked) == 2 and "코드 검증에서 버려졌다" in asked[1] and "- declined" not in asked[1]
+
+
+# 부정·제외 표현 때문에 뺀 원문은 리포트에서 사라지지 않고 '판단이 필요한 원문'으로 남는다
+def test_negated_quote_is_kept_for_human_review(monkeypatch):
+    from app import settings
+    sid = store.create_session("x", scenario="pixel")
+    store.upsert_part(sid, "3", "-> 복귀 이벤트 진행 (확률형x) 저녁 시간대 위주로 알림 발송", 100)
+    spec = [e for e in settings.observation_spec("pixel")["element"] if e["name"] == "존중·소통"][0]
+    yes = CheckAnswer(check_id="kept_issue_in_plan", answer="yes", evidence_id="plan:3", quote="(확률형x) 저녁 시간대")
+
+    async def fake(model, messages, node, sid_=""):   # 물어본 체크마다 답한다. kept_issue_in_plan은 계속 같은 오판
+        ids = [line[2:].split(":")[0] for line in messages[1].content.splitlines() if line.startswith("- ")]
+        return observe.Judgement(answers=[yes if i == "kept_issue_in_plan" else CheckAnswer(check_id=i, answer="no")
+                                          for i in ids])
+    monkeypatch.setattr(observe.llm, "ainvoke", fake)
+    r = asyncio.run(observe.observe_element(sid, spec, {"respect_review": 90}, use_cache=False))
+    kept = {c["check_id"]: c for c in r["checks"]}["kept_issue_in_plan"]
+    assert kept["answer"] == "no" and r["negated"]
+    section = report.build_body(sid, [r])["sections"][0]
+    assert not section["observed"] and section["review"] == [{"when": "기획안 3번", "quote": "(확률형x) 저녁 시간대", "message_id": None}]

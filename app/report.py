@@ -62,6 +62,17 @@ def build_body(session_id: str, results: list[dict]) -> dict:
                 section["observed"].append({"behavior": behavior, "quote": quote, "when": when, "source": source,
                                             "points": [point] if point else [],
                                             "message_id": int(eid[1:]) if eid[:1] == "m" and eid[1:].isdigit() else None})
+        # 부정·제외 표현이 있어 자동 판정에서 뺀 원문: 포인트·행동 문장 없이 원문만 보인다(사람이 판단)
+        review = []
+        for n in r.get("negated", []):
+            when = _minute_of(n["evidence_id"], session_id)
+            if any(x["when"] == when and x["quote"] == n["quote"] for x in review):
+                continue
+            eid = n["evidence_id"]
+            review.append({"when": when, "quote": n["quote"],
+                           "message_id": int(eid[1:]) if eid[:1] == "m" and eid[1:].isdigit() else None})
+        if review:
+            section["review"] = review
         if "used" in r:   # AI 활용
             section["requests"] = [{"when": clock.format_minute(q["minute"]), "request": q["request"],
                                     "reuse": q["reuse"]} for q in r.get("requests", [])]

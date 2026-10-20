@@ -37,8 +37,8 @@ situation = "담당 파트에 필요한 유저 설문 자료 지연"
 window_end_minute = 110
 candidate_keywords = ["지연", "늦", "밀리", "밀릴", "아직", "못 받", "안 와", "늦어", "먼저", "대신", "그동안"]
 checks = [
-  { id = "shared_delay", point = "마감 전에 지연이나 일정 영향을 먼저 알림", evidence_scope = "messages", question = "지원자가 마감 전에 팀장이나 동료에게 설문 자료 지연이나 그로 인한 일정 영향을 먼저 알렸는가?" },
-  { id = "proposed_alternative", point = "대안을 내거나 실행함", question = "지원자가 대안(먼저 할 수 있는 부분부터 진행, 순서 변경 등)을 내거나 실행했는가?" },
+  { id = "shared_delay", point = "마감 전에 지연이나 일정 영향을 먼저 알림", evidence_scope = "messages", quote_must_contain = ["번", "파트", "일정", "그동안", "늦어질", "늦어지", "밀릴", "밀려", "못 하", "못하", "영향"], question = "지원자가 마감 전에 팀장이나 동료에게 설문 자료 지연이나 그로 인한 일정 영향을 먼저 알렸는가?" },
+  { id = "proposed_alternative", point = "대안을 내거나 실행함", quote_must_contain = ["먼저", "부터", "순서", "그동안", "대신", "우선", "미리"], question = "지원자가 대안(먼저 할 수 있는 부분부터 진행, 순서 변경 등)을 내거나 실행했는가?" },
 ]
 
 [[element]]

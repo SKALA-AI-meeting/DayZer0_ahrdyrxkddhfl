@@ -119,7 +119,7 @@ def verify(answers: list[CheckAnswer], evidence: dict[str, str],
             elif words and not any(w in a.quote for w in words):
                 item.update(answer="no", dropped_reason="인용이 이 행동을 뒷받침하지 않음")
             elif any(w in a.quote for w in forbidden.get(a.check_id, [])):
-                item.update(answer="no", dropped_reason="인용이 반대 뜻(부정·제외)을 담고 있음")
+                item.update(answer="no", dropped_reason=NEGATED_REASON)
             else:
                 item["verified"] = True
         out.append(item)
@@ -135,6 +135,7 @@ def _with_points(checks: list[dict], spec_checks: list[dict]) -> list[dict]:
 # ---------- LLM 판별 ----------
 
 MISSING_REASON = "판별기가 답하지 않음"
+NEGATED_REASON = "인용이 반대 뜻(부정·제외)을 담고 있음"
 
 
 async def _judge(session_id: str, situation: str, checks: list[dict], transcript: str,
@@ -229,6 +230,9 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     required = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
     forbidden = {c["id"]: c["quote_must_not_contain"] for c in spec["checks"] if c.get("quote_must_not_contain")}
     checks = _mark_missing(verify(answers, evidence, scopes, required, forbidden), missing)
+    # 부정·제외 표현 때문에 뺀 원문은 버리지 않고 '판단이 필요한 원문'으로 남긴다(해석은 담당자가, PRD 5.5)
+    negated = [{"evidence_id": c["evidence_id"], "quote": c["quote"]} for c in checks
+               if c.get("dropped_reason") == NEGATED_REASON]
     for _ in range(config()["observation"]["judge_dropped_retries"]):
         # 근거가 검증에서 버려진 체크만 이유를 알려 주고 다시 묻는다(검증 → 피드백 → 재시도)
         dropped = {c["check_id"]: c["dropped_reason"] for c in checks
@@ -244,7 +248,9 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
                                             retry_hint, use_cache)
         redo = {c["check_id"]: c for c in _mark_missing(verify(again, evidence, scopes, required, forbidden), still_missing)}
         checks = [redo.get(c["check_id"], c) if c["check_id"] in dropped else c for c in checks]
-    return {**base, "happened": True, "checks": _with_points(checks, spec["checks"])}
+        negated += [{"evidence_id": c["evidence_id"], "quote": c["quote"]} for c in redo.values()
+                    if c.get("dropped_reason") == NEGATED_REASON]
+    return {**base, "happened": True, "checks": _with_points(checks, spec["checks"]), "negated": negated}
 
 
 # ---------- AI 활용 ----------

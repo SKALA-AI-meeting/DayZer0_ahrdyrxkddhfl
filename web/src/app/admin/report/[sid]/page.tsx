@@ -10,6 +10,7 @@ type Observed = { behavior: string; quote: string; when: string; source?: string
 type Section = {
   element: string; situation: string; observed: Observed[]; note?: string; summary?: string;
   followups?: { id: number; when: string }[];
+  review?: { when: string; quote: string; message_id: number | null }[];
   requests?: { when: string; request: string; reuse: string }[];
 };
 type Data = { alias: string; status: string; names: Record<string, string>; pack: { company: string; task_title: string }; report: { sections: Section[]; disclaimer: string } | null;
@@ -81,6 +82,17 @@ export default function ReportPage() {
                     <tr key={i}><td>{q.when}</td><td>{q.request}</td><td>{q.reuse}</td></tr>
                   ))}</tbody>
                 </table>
+              )}
+              {s.review && s.review.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="small"><b>판단이 필요한 원문</b> <span className="muted">(부정·제외 표현이 있어 AI가 자동 판정에서 뺐어요. 원문을 보고 판단해 주세요)</span></div>
+                  {s.review.map((v, i) => (
+                    <div key={i} className="quote">
+                      <span className="time">{v.message_id ? `${v.when} 대화` : v.when}</span> “{v.quote}”{" "}
+                      {v.message_id && <a href="#" onClick={(e) => { e.preventDefault(); jumpTo(v.message_id!); }}>대화에서 보기</a>}
+                    </div>
+                  ))}
+                </div>
               )}
               {s.note && <p className="notice small">{s.note}</p>}
               {s.followups && (
