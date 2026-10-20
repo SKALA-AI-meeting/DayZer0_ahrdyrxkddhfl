@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import Nav from "@/components/Nav";
 import { api, Msg, NAME } from "@/lib/api";
 
 type Observed = { behavior: string; quote: string; when: string };
@@ -30,10 +31,12 @@ export default function ReportPage() {
     document.getElementById(`m${hit.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  if (error) return <main className="page"><div className="error">{error}</div></main>;
-  if (!data) return <main className="page muted">불러오는 중…</main>;
+  if (error) return <><Nav /><main className="page"><div className="error">{error}</div></main></>;
+  if (!data) return <><Nav /><main className="page muted">불러오는 중…</main></>;
 
   return (
+    <>
+    <Nav />
     <main className="page">
       <Link href="/admin">← 지원자 목록</Link>
       <h1 style={{ marginTop: 8 }}>{data.alias} 관찰 리포트</h1>
@@ -47,8 +50,8 @@ export default function ReportPage() {
               <h2>{s.element}</h2>
               <p className="muted">상황: {s.situation}</p>
               {s.observed.map((o, i) => (
-                <div key={i} style={{ marginBottom: 10 }}>
-                  <div><b>{o.when}</b> {o.behavior}</div>
+                <div key={i} className="obs">
+                  <div><span className="time">{o.when}</span>{o.behavior}</div>
                   <div className="quote">
                     “{o.quote}” {o.when !== "기획안" && <a href="#" onClick={(e) => { e.preventDefault(); jump(o.quote); }}>대화에서 보기</a>}
                   </div>
@@ -62,7 +65,7 @@ export default function ReportPage() {
                   ))}</tbody>
                 </table>
               )}
-              {s.note && <p className="muted">{s.note}</p>}
+              {s.note && <p className="notice small">{s.note}</p>}
             </div>
           ))}
         </>
@@ -70,12 +73,13 @@ export default function ReportPage() {
       <div className="card">
         <h2>전체 대화 기록</h2>
         {data.messages.map((m) => (
-          <div key={m.id} id={`m${m.id}`} className={`msg ${focus === m.id ? "highlight" : ""}`}>
+          <div key={m.id} id={`m${m.id}`} className={`msgline ${focus === m.id ? "highlight" : ""}`}>
             <span className="muted">[{m.time}][{m.channel}]</span>{" "}
             <span className="who">{m.sender === "candidate" ? data.alias : NAME[m.sender]}</span>{m.content}
           </div>
         ))}
       </div>
     </main>
+    </>
   );
 }

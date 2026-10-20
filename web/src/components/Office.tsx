@@ -121,33 +121,36 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
   if (!state) return <main className="page muted">오피스에 입장하는 중…</main>;
   const chat = messages.filter((m) => (tab === "team" ? ["team", "system"] : ["dm"]).includes(m.channel));
   const assistantLog = messages.filter((m) => m.channel === "assistant");
+  const STATUS: Record<string, string> = { todo: "할 일", doing: "진행 중", done: "완료" };
 
   return (
     <div className="office">
       <div className="topbar">
-        <b>루프랩 · 모아런 신규 기능 기획</b>
-        <span>남은 시간 <span className="timer">{mmss(state.remaining)}</span></span>
+        <span className="row"><span className="logo">Day <span>Zer0</span></span>
+          <span className="muted">루프랩 · 모아런 신규 기능 기획</span></span>
+        <span className="row">남은 시간 <span className={`timer ${state.remaining < 10 ? "low" : ""}`}>{mmss(state.remaining)}</span></span>
         <button onClick={submit}>기획안 제출</button>
       </div>
 
       {/* 메신저 */}
       <section className="col">
         <div className="tabs">
-          <button className={tab === "team" ? "" : "secondary"} onClick={() => setTab("team")}># 팀 채널</button>
-          <button className={tab === "dm" ? "" : "secondary"} onClick={() => setTab("dm")}>이도현 (1:1)</button>
+          <button className={tab === "team" ? "active" : ""} onClick={() => setTab("team")}># 팀 채널</button>
+          <button className={tab === "dm" ? "active" : ""} onClick={() => setTab("dm")}>이도현 · 1:1</button>
         </div>
         <div className="chat">
-          {chat.map((m) => (
-            <div key={m.id} className={`msg ${m.sender === "candidate" ? "mine" : ""} ${m.sender === "system" ? "system" : ""}`}>
-              <span className="muted">{m.time}</span> <span className="who">{NAME[m.sender]}</span>{m.content}
-            </div>
+          {chat.length === 0 && <div className="typing">아직 메시지가 없어요.</div>}
+          {chat.map((m) => m.sender === "system" ? (
+            <div key={m.id} className="sysmsg">{m.time} · {m.content}</div>
+          ) : (
+            <Bubble key={m.id} m={m} />
           ))}
-          {busy && <div className="muted">답장을 기다리는 중…</div>}
+          {busy && <div className="typing">{tab === "dm" ? "이도현" : "한서윤 팀장"}님이 입력 중…</div>}
         </div>
-        <div className="row">
+        <div className="composer">
           <textarea rows={2} value={draft} onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
-            placeholder={tab === "team" ? "팀 채널에 메시지" : "이도현에게 메시지"} />
+            placeholder={tab === "team" ? "팀 채널에 메시지 (Enter 전송, Shift+Enter 줄바꿈)" : "이도현에게 메시지"} />
           <button onClick={send} disabled={busy}>보내기</button>
         </div>
         {error && <div className="error" onClick={() => setError("")}>{error}</div>}
@@ -155,55 +158,71 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
 
       {/* 공유 문서: 기획안 5파트 */}
       <section className="col">
-        <h2>공유 문서 · 기획안</h2>
-        {Object.entries(state.part_titles).map(([part, title]) => (
-          <div className="part" key={part}>
-            <h3>{part}. {title}</h3>
-            <textarea rows={4} value={parts[part] ?? ""} onChange={(e) => editPart(part, e.target.value)}
-              placeholder="여기에 작성하면 자동 저장됩니다." />
-            {state.coworker_parts[part] && (
-              <div className="shared"><b>이도현 공유</b>{"\n"}{state.coworker_parts[part]}</div>
-            )}
-          </div>
-        ))}
+        <div><h2 style={{ marginBottom: 2 }}>공유 문서 · 기획안</h2>
+          <span className="muted small">입력하면 자동 저장됩니다. 동료가 공유한 내용은 파란 상자로 보여요.</span></div>
+        {Object.entries(state.part_titles).map(([part, title]) => {
+          const owner = state.tasks.find((t) => t.part === part)?.owner ?? "candidate";
+          return (
+            <div className="part" key={part}>
+              <h3>{part}. {title} <span className={`owner ${owner}`}>{NAME[owner]}</span></h3>
+              <textarea rows={4} value={parts[part] ?? ""} onChange={(e) => editPart(part, e.target.value)}
+                placeholder="여기에 작성하세요." />
+              {state.coworker_parts[part] && (
+                <div className="shared"><b>이도현 공유</b>{"\n"}{state.coworker_parts[part]}</div>
+              )}
+            </div>
+          );
+        })}
       </section>
 
       {/* 보드 · 문서 · 어시스턴트 */}
       <section className="col">
-        <div>
+        <div className="panel">
           <h2>태스크 보드</h2>
           {state.tasks.map((t) => (
             <div className="task" key={t.part}>
-              <span>{t.part}. {t.title}<br /><span className="muted">{NAME[t.owner]}</span></span>
+              <span>{t.part}. {t.title} <span className={`owner ${t.owner}`}>{NAME[t.owner]}</span></span>
               {["candidate", "both"].includes(t.owner) ? (
-                <select value={t.status} onChange={(e) => setTask(t.part, e.target.value)} style={{ width: 90 }}>
+                <select value={t.status} onChange={(e) => setTask(t.part, e.target.value)} style={{ width: 96 }}>
                   <option value="todo">할 일</option><option value="doing">진행 중</option><option value="done">완료</option>
                 </select>
-              ) : <span className="badge">{{ todo: "할 일", doing: "진행 중", done: "완료" }[t.status]}</span>}
+              ) : <span className="badge">{STATUS[t.status]}</span>}
             </div>
           ))}
         </div>
-        <div>
+        <div className="panel">
           <h2>회사 문서</h2>
-          {state.docs.map((d) => <div key={d.id}><a href="#" onClick={(e) => { e.preventDefault(); openDoc(d.id); }}>{d.title}</a></div>)}
-          {doc && <div className="doc-body"><b>{doc.title}</b> <a href="#" onClick={(e) => { e.preventDefault(); setDoc(null); }}>닫기</a>{"\n\n"}{doc.body}</div>}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, minHeight: 240 }}>
-          <h2>AI 어시스턴트</h2>
-          <div className="chat">
-            {assistantLog.map((m) => (
-              <div key={m.id} className={`msg ${m.sender === "candidate" ? "mine" : ""}`}>
-                <span className="who">{NAME[m.sender]}</span>{m.content}
-              </div>
-            ))}
-            {asking && <div className="muted">답변 작성 중…</div>}
+          <div className="doc-chips">
+            {state.docs.map((d) => <button key={d.id} className="chip" onClick={() => openDoc(d.id)}>{d.title}</button>)}
           </div>
-          <div className="row">
-            <textarea rows={2} value={askDraft} onChange={(e) => setAskDraft(e.target.value)} placeholder="질문·요약·초안 요청" />
+          {doc && <div className="doc-body"><div className="row" style={{ justifyContent: "space-between" }}><b>{doc.title}</b>
+            <button className="ghost" onClick={() => setDoc(null)}>닫기</button></div>{doc.body}</div>}
+        </div>
+        <div className="panel" style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, minHeight: 280 }}>
+          <h2>AI 어시스턴트 <span className="muted small">업무용 도구 · 회사 문서를 참고해 답해요</span></h2>
+          <div className="chat">
+            {assistantLog.length === 0 && <div className="typing">질문, 요약, 초안 작성을 요청해 보세요.</div>}
+            {assistantLog.map((m) => <Bubble key={m.id} m={m} />)}
+            {asking && <div className="typing">답변 작성 중…</div>}
+          </div>
+          <div className="composer">
+            <textarea rows={2} value={askDraft} onChange={(e) => setAskDraft(e.target.value)} placeholder="예: 지표 현황 요약해 줘" />
             <button onClick={ask} disabled={asking}>요청</button>
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+const INITIAL: Record<string, string> = { candidate: "나", coworker: "도현", lead: "서윤", assistant: "AI" };
+
+function Bubble({ m }: { m: Msg }) {
+  const mine = m.sender === "candidate";
+  return (
+    <div className={`bubble-row ${mine ? "mine" : ""}`}>
+      <span className={`avatar ${m.sender}`}>{INITIAL[m.sender] ?? "?"}</span>
+      <div className="bubble"><span className="meta">{mine ? "" : `${NAME[m.sender]} · `}{m.time}</span>{m.content}</div>
     </div>
   );
 }

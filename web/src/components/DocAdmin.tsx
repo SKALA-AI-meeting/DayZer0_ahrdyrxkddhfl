@@ -64,7 +64,7 @@ export default function DocAdmin() {
                     <button onClick={() => decide(r.request_id, true)}>승인</button>
                     <button className="secondary" onClick={() => decide(r.request_id, false)}>거절</button>
                   </div>
-                ) : <span className="badge">{REQ_LABEL[r.status] ?? r.status}</span>}
+                ) : <span className={`badge ${r.status}`}>{REQ_LABEL[r.status] ?? r.status}</span>}
               </td>
             </tr>
           ))}</tbody>
