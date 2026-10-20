@@ -270,3 +270,35 @@ def test_judge_ignores_incomplete_old_cache(monkeypatch):
     _fake_judge(monkeypatch, [[CheckAnswer(check_id=c["id"], answer="no") for c in CHECKS]])
     answers, _ = asyncio.run(observe._judge("s", "상황", CHECKS, "기록-캐시", "", use_cache=True))
     assert len(answers) == 3 and len(asked) == 1
+
+
+# 회귀: 기획안 "(확률형x)"(확률형을 쓰지 않음)를 '정책과 어긋나는 확률형 내용이 들어 있음'으로 기록했다
+def test_verify_drops_negated_quote():
+    from app import settings
+    spec = [e for e in settings.observation_spec("pixel")["element"] if e["name"] == "존중·소통"][0]
+    req = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
+    neg = {c["id"]: c["quote_must_not_contain"] for c in spec["checks"] if c.get("quote_must_not_contain")}
+    ev = {"plan:3": "-> 복귀 이벤트 진행 (확률형x) 저녁 시간대 위주로 알림 발송",
+          "plan:2": "여기에 확률형 아이템 뽑기를 추가로.",
+          "m5": "운영 정책에 확률형 아이템을 지급하지 않는다는 항목이 있어서 수정이 필요할 것 같습니다",
+          "m6": "전설 장비 상자 지급 둘 다 좋은 듯합니다!"}
+    answers = [CheckAnswer(check_id="kept_issue_in_plan", answer="yes", evidence_id="plan:3", quote="-> 복귀 이벤트 진행 (확률형x) 저녁 시간대"),
+               CheckAnswer(check_id="kept_issue_in_plan", answer="yes", evidence_id="plan:2", quote="여기에 확률형 아이템 뽑기를 추가로."),
+               CheckAnswer(check_id="endorsed_issue", answer="yes", evidence_id="m5", quote="운영 정책에 확률형 아이템을 지급하지 않는다는 항목이 있어서"),
+               CheckAnswer(check_id="endorsed_issue", answer="yes", evidence_id="m6", quote="전설 장비 상자 지급 둘 다 좋은 듯합니다!")]
+    scopes = {"kept_issue_in_plan": "plan", "endorsed_issue": "messages"}
+    out = observe.verify(answers, ev, scopes, req, neg)
+    assert out[0]["dropped_reason"] == "인용이 반대 뜻(부정·제외)을 담고 있음"
+    assert out[1]["verified"]
+    assert out[2]["answer"] == "no" and out[3]["verified"]
+
+
+def test_report_merges_quote_contained_in_another():
+    sid = store.create_session("x")
+    mid = store.add_message(sid, "dm", "candidate", "그런데 운영 정책에 확률형 금지 항목이 있어서 수정이 필요할 것 같습니다.", 97)
+    checks = [{"check_id": "noticed_error", "answer": "yes", "verified": True, "evidence_id": f"m{mid}",
+               "quote": "그런데 운영 정책에 확률형 금지 항목이 있어서 수정이 필요할 것 같습니다.", "point": "알림"},
+              {"check_id": "cited_basis", "answer": "yes", "verified": True, "evidence_id": f"m{mid}",
+               "quote": "운영 정책에 확률형 금지 항목이 있어서", "point": "근거 제시"}]
+    obs = report.build_body(sid, [{"element": "존중·소통", "situation": "s", "happened": True, "checks": checks}])["sections"][0]["observed"]
+    assert len(obs) == 1 and obs[0]["points"] == ["알림", "근거 제시"] and obs[0]["quote"].startswith("그런데")

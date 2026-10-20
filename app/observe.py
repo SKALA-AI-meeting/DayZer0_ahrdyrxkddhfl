@@ -89,20 +89,23 @@ def _in_scope(scope: str, evidence_id: str) -> bool:
 
 
 def verify(answers: list[CheckAnswer], evidence: dict[str, str],
-           scopes: dict[str, str] | None = None, required: dict[str, list[str]] | None = None) -> list[dict]:
+           scopes: dict[str, str] | None = None, required: dict[str, list[str]] | None = None,
+           forbidden: dict[str, list[str]] | None = None) -> list[dict]:
     """yes 답 중 근거로 인정할 수 없는 것을 근거 없음으로 바꾼다.
 
     1) 인용이 원문에 없거나 허용 범위 밖이면 버린다(지어낸 인용).
     2) 인용이 원문에 있어도 그 행동을 보여 주는 말(required)이 없으면 버린다(과장된 행동 문장).
+    3) 인용에 반대 뜻(부정·제외, forbidden)이 있으면 버린다("(확률형x)"를 '확률형을 넣음'으로 읽는 실수).
 
     Args:
         answers: 판별기 답.
         evidence: 근거 id → 원문.
         scopes: 체크 id → "messages"(지원자 메시지만) | "plan"(기획안만) | "all". 없으면 all.
         required: 체크 id → 인용에 하나는 들어 있어야 하는 말 목록. 없으면 검사하지 않는다.
+        forbidden: 체크 id → 인용에 있으면 안 되는 말 목록. 없으면 검사하지 않는다.
     """
     threshold = config()["observation"]["quote_match_threshold"]
-    scopes, required = scopes or {}, required or {}
+    scopes, required, forbidden = scopes or {}, required or {}, forbidden or {}
     out = []
     for a in answers:
         item = a.model_dump()
@@ -115,6 +118,8 @@ def verify(answers: list[CheckAnswer], evidence: dict[str, str],
                 item.update(answer="no", dropped_reason="인용이 원문에서 확인되지 않음")
             elif words and not any(w in a.quote for w in words):
                 item.update(answer="no", dropped_reason="인용이 이 행동을 뒷받침하지 않음")
+            elif any(w in a.quote for w in forbidden.get(a.check_id, [])):
+                item.update(answer="no", dropped_reason="인용이 반대 뜻(부정·제외)을 담고 있음")
             else:
                 item["verified"] = True
         out.append(item)
@@ -222,7 +227,8 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     evidence = _evidence_texts(messages, plan or {})
     scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
     required = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
-    checks = _mark_missing(verify(answers, evidence, scopes, required), missing)
+    forbidden = {c["id"]: c["quote_must_not_contain"] for c in spec["checks"] if c.get("quote_must_not_contain")}
+    checks = _mark_missing(verify(answers, evidence, scopes, required, forbidden), missing)
     return {**base, "happened": True, "checks": _with_points(checks, spec["checks"])}
 
 

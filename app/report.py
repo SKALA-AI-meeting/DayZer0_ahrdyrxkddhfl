@@ -46,8 +46,12 @@ def build_body(session_id: str, results: list[dict]) -> dict:
                     behavior = ""
                 when, quote = _minute_of(c["evidence_id"], session_id), c.get("quote", "")
                 point = c.get("point", "")
-                same = next((o for o in section["observed"] if o["when"] == when and o["quote"] == quote), None)
+                # 같은 시각의 인용이 서로를 포함하면(예: 앞에 "그런데"만 더 붙음) 같은 근거로 본다
+                same = next((o for o in section["observed"] if o["when"] == when
+                             and (quote in o["quote"] or o["quote"] in quote)), None)
                 if same:   # 같은 인용이 여러 체크의 근거면 한 번만 보이고 행동 문장·관찰 포인트를 합친다
+                    if len(quote) > len(same["quote"]):
+                        same["quote"] = quote   # 더 긴 원문을 보인다
                     if behavior and behavior not in same["behavior"]:
                         same["behavior"] = f"{same['behavior']} / {behavior}" if same["behavior"] else behavior
                     if point and point not in same["points"]:
