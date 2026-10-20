@@ -64,7 +64,7 @@ deferral_phrases = ["확인하고", "검토하고", "확인해볼게요", "확�
 [context]
 # 도구 결과를 모델에 넘길 때 최대 글자 수. 크면 근거가 풍부하지만 Token이 늘어난다.
 tool_result_max_chars = 2000
-# 대화 기록을 모델에 넣을 때 Token 예산(대략). 넘으면 오래된 대화를 요약한다.
+# 대화 기록을 모델에 넣을 때 Token 예산(대략). 넘는 앞부분은 LLM으로 요약해 넣는다(app/persona.py context).
 # 크면 맥락을 더 기억하지만 비용·지연이 늘어난다.
 history_token_budget = 6000
 

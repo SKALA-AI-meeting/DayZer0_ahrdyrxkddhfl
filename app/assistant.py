@@ -22,7 +22,7 @@ async def ask(session_id: str, minute: float, text: str) -> str:
     else:
         system = (f"{prompt('assistant')}\n\n## 지금 볼 수 있는 회사 문서\n"
                   f"{persona.docs_text(minute, company)}\n이 목록에 없는 문서는 아직 볼 수 없다.")
-        human = (f"이전 대화:\n{persona.transcript(session_id, ('assistant',))}\n\n"
+        human = (f"이전 대화:\n{await persona.context(session_id, ('assistant',))}\n\n"
                  "가장 마지막 사용자 요청에 답하라.")
         try:
             result = await speak_graph.speak(

@@ -1,30 +1,76 @@
 """동료(이도현)·팀장(한서윤)·어시스턴트의 말을 만든다.
 
-- 대화 맥락은 최근 메시지를 history_token_budget 안에서 잘라 넣는다(Harness: Context).
+- 대화 맥락(Harness: Context): 최근 메시지는 history_token_budget 안에서 원문 그대로 넣고,
+  예산을 넘는 앞부분은 LLM으로 요약해 넣는다(요약은 캐시, 판정 표현이 섞이면 버림).
 - 실제 문장 생성과 검증(판정 발언·필수 내용·출처)은 발화 Graph(app/speak_graph.py)가 한다.
 """
-from app import clock, docs, speak_graph, store
+import hashlib
+import logging
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from app import clock, docs, guard, llm, speak_graph, store
 from app.settings import PART_TITLES, config, prompt
+
+log = logging.getLogger("dayzero.persona")
 
 NAMES = {"candidate": "지원자", "coworker": "이도현", "lead": "한서윤 팀장",
          "system": "시스템", "assistant": "AI 어시스턴트", "both": "함께"}
 CHARS_PER_TOKEN = 2   # 한국어 대략치: Token 예산을 글자 수로 바꿀 때 쓰는 근사 상수
 
 
-def transcript(session_id: str, channels: tuple[str, ...]) -> str:
-    """최근 대화를 예산 안에서 잘라 텍스트로 만든다. 넘친 앞부분은 생략 표시만 남긴다."""
+def _split(session_id: str, channels: tuple[str, ...]) -> tuple[list[dict], list[str], list[str]]:
+    """대화를 (예산을 넘은 앞부분 메시지, 그 줄들, 예산 안의 최근 줄들)로 나눈다."""
     budget = config()["context"]["history_token_budget"] * CHARS_PER_TOKEN
+    msgs = store.list_messages(session_id, channels=channels)
     lines = [f"[{clock.format_minute(m['minute'])}][{m['channel']}] {NAMES[m['sender']]}: {m['content']}"
-             for m in store.list_messages(session_id, channels=channels)]
+             for m in msgs]
     kept, size = [], 0
     for line in reversed(lines):
         if size + len(line) > budget:
             break
         kept.append(line)
         size += len(line)
-    skipped = len(lines) - len(kept)
-    head = [f"(이전 대화 {skipped}개 생략)"] if skipped else []
-    return "\n".join(head + list(reversed(kept))) or "(아직 대화 없음)"
+    cut = len(lines) - len(kept)
+    return msgs[:cut], lines[:cut], list(reversed(kept))
+
+
+def transcript(session_id: str, channels: tuple[str, ...]) -> str:
+    """요약 없이 예산 안의 최근 대화만 (넘친 앞부분은 생략 표시)."""
+    _, old, recent = _split(session_id, channels)
+    head = [f"(이전 대화 {len(old)}개 생략)"] if old else []
+    return "\n".join(head + recent) or "(아직 대화 없음)"
+
+
+async def context(session_id: str, channels: tuple[str, ...]) -> str:
+    """모델에 넣을 대화 맥락. 예산을 넘는 앞부분은 요약해 앞에 붙인다(Harness: Context).
+
+    요약은 "세션·채널·마지막으로 요약한 메시지"로 캐시해 같은 부분을 다시 요약하지 않는다.
+    요약이 실패하거나 판정 표현이 섞이면 요약 대신 생략 표시만 남긴다.
+    """
+    old_msgs, old, recent = _split(session_id, channels)
+    if not old:
+        return "\n".join(recent) or "(아직 대화 없음)"
+    key = hashlib.sha256(f"summary|{session_id}|{','.join(channels)}|{old_msgs[-1]['id']}|"
+                         f"{prompt('summarize')}".encode()).hexdigest()
+    cached = store.cache_get(key)
+    summary = cached["summary"] if cached else None
+    if summary is None:
+        try:
+            out = await llm.ainvoke(llm.chat_model(config()["llm"]["judge_temperature"]),
+                                    [SystemMessage(prompt("summarize")), HumanMessage("\n".join(old))],
+                                    "context.summarize", session_id)
+            summary = str(out.content).strip()
+        except Exception:   # 요약 실패는 생략 표시로 대신한다(원인은 로그에)
+            log.exception("대화 요약 실패: session=%s", session_id)
+            summary = ""
+        if summary and guard.violates(summary):
+            summary = ""
+        if summary:
+            store.cache_put(key, {"summary": summary})
+    head = (f"(이전 대화 {len(old)}개 요약)\n{summary}" if summary
+            else f"(이전 대화 {len(old)}개 생략)")
+    return "\n".join([head] + recent)
 
 
 def docs_text(minute: float, company: str = "") -> str:
@@ -64,7 +110,7 @@ async def speak(role: str, session_id: str, minute: float, task: str,
     system = (f"{prompt(role)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
               f"- 현재 분담: {assignment_text(session['assignment'])}\n"
               f"- 지금 볼 수 있는 회사 문서: {docs_text(minute, session['company'])} (이 목록에 없는 문서는 아직 볼 수 없다)")
-    human = (f"최근 대화:\n{transcript(session_id, channels)}\n\n지금 할 일: {task}\n"
+    human = (f"최근 대화:\n{await context(session_id, channels)}\n\n지금 할 일: {task}\n"
              "메신저에 보낼 메시지 본문만 써라.")
     result = await speak_graph.speak(
         session_id=session_id, node=f"persona.{role}", system=system, human=human, minute=minute,
