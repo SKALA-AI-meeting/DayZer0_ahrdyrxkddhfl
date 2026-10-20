@@ -245,7 +245,7 @@ async def poll(token: str, after: int = 0) -> dict:
         "my_parts": {k: v for k, v in parts.items() if k in settings.PART_IDS},
         "coworker_parts": {k.split(":")[1]: v for k, v in parts.items() if k.startswith("coworker:")},
         "docs": [{"id": d["id"], "title": d["title"]}
-                 for d in docs_module.available(s["company"], state["minute"])],
+                 for d in docs_module.available(s["company"], state["minute"], s["scenario"])],
         "part_titles": settings.part_titles(s["scenario"]),
         "names": settings.names(s["scenario"]),
         "pack": _pack_public(s["scenario"]),

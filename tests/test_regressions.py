@@ -104,6 +104,23 @@ def test_lead_does_not_see_dm(monkeypatch):
     assert "팀 채널 메시지" in seen["human"] and "비밀 1:1 메시지" not in seen["human"]
 
 
+# 회귀: 지원자가 동료 아이디어에 동의하면 동료가 그걸 지원자 의견처럼 칭찬했다 → 동료 자신의 공유분을 맥락에 밝힌다
+def test_coworker_knows_its_own_shared_work(monkeypatch):
+    from app import persona
+    seen = {}
+
+    async def fake_speak(**kw):
+        seen["system"] = kw["system"]
+        return {"text": "ok", "verdicts": [], "read_titles": []}
+    monkeypatch.setattr(persona.speak_graph, "speak", fake_speak)
+    sid = store.create_session("x")
+    store.upsert_part(sid, "coworker:3", "7일 출석 보상: 확률형 전설 상자", 90)
+    asyncio.run(persona.speak("coworker", sid, 115, "답하라", ("team", "dm", "system")))
+    assert "네가 공유한 작업" in seen["system"] and "확률형 전설 상자" in seen["system"]
+    asyncio.run(persona.speak("lead", sid, 115, "답하라", ("team", "dm", "system")))
+    assert "네가 공유한 작업" not in seen["system"]
+
+
 # 세션은 끝났는데(완료) 리포트 작업이 시작되기 전에 서버가 멈춘 경우도 재시작 때 만든다(F-32)
 def test_completed_session_without_report_is_generated_on_startup(monkeypatch):
     sid = store.create_session("x")

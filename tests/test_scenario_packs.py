@@ -73,6 +73,15 @@ def test_candidate_can_read_pack_only_doc():
     assert r.status_code == 200 and r.json()["title"] == "유저 설문 요약"
 
 
+def test_candidate_doc_list_follows_session_pack():
+    # 회귀: 화면 문서 목록이 팩을 넘기지 않아 픽셀게임즈 세션에 루프랩 '사용자 인터뷰 요약'이 보였고, 누르면 404였다
+    sid = store.create_session("D", company="목록HR", scenario="pixel", invite_token="tok-pixel-list",
+                               invite_expires_at=time.time() + 3600)
+    store.update_session(sid, status="completed", phase="done", sim_seconds=70 * 60)   # 시계·LLM이 돌지 않게 끝난 세션
+    titles = {d["title"] for d in client.get("/api/invite/tok-pixel-list/poll").json()["docs"]}
+    assert "유저 설문 요약" in titles and "사용자 인터뷰 요약" not in titles
+
+
 def test_admin_docs_follow_company_pack():
     H = _signup("docs@px.kr", "문서목록HR")
     client.put("/api/admin/scenario", json={"scenario": "pixel"}, headers=H)
