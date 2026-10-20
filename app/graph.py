@@ -78,8 +78,10 @@ async def run_scene(state: TurnState) -> TurnState:
         task = (f"기획안 {nums}에 넣을 너(이도현)의 작업 내용을 공유 문서에 올렸으니, 지원자에게 "
                 "리뷰해 달라고 한두 문장으로 짧게 부탁하라. '내가 맡은 파트'라고 단정하지 마라. "
                 "지원자를 '도현님'이라고 부르지 마라. 내용을 요약하거나 특정 항목을 언급하지 마라.")
+    # 장면 대사는 필수 내용(must_include)이 들어갔는지 코드가 검증하고, 끝내 빠지면 원문 대사를 쓴다(F-23).
     text = await persona.speak(scene["speaker"], sid, state["minute"], task, ALL_CHANNELS,
-                               use_tools=False)
+                               use_tools=False, must_include=scene.get("must_include"),
+                               fallback=scene.get("fallback"))
     if shared:
         text += "\n\n" + "\n\n".join(shared)
     _post(state, scene["channel"], scene["speaker"], text)

@@ -49,6 +49,26 @@ async def doc_tools(session_minute: float):
                for fn in (search_company_docs, read_company_doc, list_company_docs)]
 
 
+async def _spec_only(**_kwargs) -> str:
+    raise RuntimeError("설명용 도구입니다. 실행은 doc_tools()로 연결한 도구로 합니다.")
+
+
+def doc_tool_specs() -> list[StructuredTool]:
+    """모델에게 도구 목록만 알려 줄 때 쓰는 설명용 도구(이름·설명·인자가 doc_tools와 같다).
+
+    모델이 도구를 고르는 단계마다 MCP 서버를 띄우지 않으려고 분리했다. 실행은 doc_tools로 한다.
+    """
+    specs = [("search_company_docs", "회사 문서(지표, 정책, 회의록, 소개, 인터뷰 등)에서 관련 문단을 찾는다. 결과의 title을 출처로 밝힌다.",
+              {"query": (str, ...)}),
+             ("read_company_doc", "회사 문서 전문을 읽는다. doc_id는 list_company_docs 결과의 doc_id.",
+              {"doc_id": (str, ...)}),
+             ("list_company_docs", "지금 읽을 수 있는 회사 문서 목록을 본다.", {})]
+    from pydantic import create_model
+    return [StructuredTool.from_function(coroutine=_spec_only, name=name, description=desc,
+                                         args_schema=create_model(f"{name}_args", **fields))
+            for name, desc, fields in specs]
+
+
 async def call_business(tool_name: str, args: dict) -> str:
     """business-mcp 도구를 코드에서 직접 호출한다 (예: 분업 확정 후 assign_tasks)."""
     async with _client().session("business") as session:

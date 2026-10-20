@@ -1,12 +1,10 @@
 """AI 어시스턴트 (F-16): 지원자가 직접 쓰는 업무용 도구.
 
-Graph와 별도의 단순한 도구 호출 흐름이다(PRD A.3). 회사 문서 검색 도구만 쓰며,
-지원자 문서에 직접 쓰지 않는다. 요청과 응답은 AI 활용 관찰을 위해 assistant 채널에 남긴다(F-31).
+세션 진행 Graph와 별도로, 요청마다 발화 Graph(app/speak_graph.py)를 한 번 실행한다(PRD A.3).
+회사 문서 검색 도구만 쓰며 지원자 문서에 직접 쓰지 않는다. 답의 출처가 실제로 읽은 문서인지
+코드가 검증한다. 요청과 응답은 AI 활용 관찰을 위해 assistant 채널에 남긴다(F-31).
 """
-from langchain_core.messages import HumanMessage
-
-from app import agent_loop, guard, persona, store
-from app.mcp_client import doc_tools
+from app import guard, persona, speak_graph, store
 from app.settings import config, prompt
 
 
@@ -16,19 +14,13 @@ async def ask(session_id: str, minute: float, text: str) -> str:
     if guard.is_evaluation_question(text):
         answer = guard.notice()
     else:
-        human = HumanMessage(f"이전 대화:\n{persona.transcript(session_id, ('assistant',))}\n\n"
-                             "가장 마지막 사용자 요청에 답하라.")
-        answer = ""
-        for _ in range(2):
-            async with doc_tools(minute) as tools:
-                system = (f"{prompt('assistant')}\n\n## 지금 볼 수 있는 회사 문서\n"
-                          f"{persona.docs_text(minute)}\n이 목록에 없는 문서는 아직 볼 수 없다.")
-                answer, _ = await agent_loop.run(system, [human], tools,
-                                                 config()["llm"]["persona_temperature"],
-                                                 "assistant", session_id)
-            if not guard.violates(answer):
-                break
-        else:
-            answer = guard.notice()
-    store.add_message(session_id, "assistant", "assistant", answer.strip(), minute)
-    return answer.strip()
+        system = (f"{prompt('assistant')}\n\n## 지금 볼 수 있는 회사 문서\n"
+                  f"{persona.docs_text(minute)}\n이 목록에 없는 문서는 아직 볼 수 없다.")
+        human = (f"이전 대화:\n{persona.transcript(session_id, ('assistant',))}\n\n"
+                 "가장 마지막 사용자 요청에 답하라.")
+        result = await speak_graph.speak(
+            session_id=session_id, node="assistant", system=system, human=human, minute=minute,
+            use_tools=True, fallback=config()["verify"]["fallback_assistant"])
+        answer = result["text"]
+    store.add_message(session_id, "assistant", "assistant", answer, minute)
+    return answer

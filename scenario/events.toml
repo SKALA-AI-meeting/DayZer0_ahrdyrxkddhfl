@@ -2,6 +2,10 @@
 # 시점(at_minute)·발화자·전달 내용은 PRD 고정값이다. Slack 합의 없이 바꾸지 않는다.
 # "message"는 전달할 내용이다. 실제 문장은 페르소나가 대화 흐름에 맞게 자연스럽게 바꿔 말한다(PRD 6.4).
 # channel: team = 팀 채널, dm = 동료 1:1, system = 시스템 알림
+#
+# 아래 두 칸은 PRD 내용을 바꾸지 않고, AI가 만든 문장을 코드가 검증하기 위해 덧붙인 것이다(F-23).
+# - must_include: 페르소나 문장에 반드시 들어가야 할 사실. 안쪽 목록은 "이 중 하나". 빠지면 다시 생성한다.
+# - fallback: 다시 생성해도 통과하지 못하면 그대로 내보내는 문장(전달 내용을 그대로 옮긴 것).
 
 [[scene]]
 id = "kickoff"
@@ -10,6 +14,8 @@ speaker = "lead"
 channel = "team"
 element = ""
 message = "첫 모임에 나온 사용자가 두 번째 모임에도 다시 나오게 만드는 신규 기능을 기획해 주세요. 2시간 뒤 2~3쪽 기획안을 공유 문서로 받겠습니다. 필요하면 AI 어시스턴트를 써도 됩니다."
+must_include = [["두 번째 모임"], ["2시간"], ["기획안"], ["AI 어시스턴트", "어시스턴트"]]
+fallback = "첫 모임에 나온 사용자가 두 번째 모임에도 다시 나오게 만드는 신규 기능을 기획해 주세요. 2시간 뒤 2~3쪽 기획안을 공유 문서로 받겠습니다. 필요하면 AI 어시스턴트를 써도 됩니다."
 
 [[scene]]
 id = "kickoff_greeting"
@@ -18,6 +24,8 @@ speaker = "coworker"
 channel = "team"
 element = ""
 message = "오늘 합류한 지원자에게 반갑게 인사한다. 입사 2년 차 기획자 이도현으로 자기소개한다."
+must_include = [["이도현"]]
+fallback = "안녕하세요, 오늘부터 같이 일하게 된 2년 차 기획자 이도현입니다. 잘 부탁드려요!"
 
 [[scene]]
 id = "negotiate"
@@ -26,6 +34,8 @@ speaker = "coworker"
 channel = "dm"
 element = ""
 message = "기본 분담안을 제안한다: 1·2번은 지원자, 3번은 함께, 4·5번은 이도현. 다르게 나누고 싶으면 말해 달라고 한다."
+must_include = [["1번", "1·2번", "1, 2번"], ["3번"], ["4번", "4·5번", "4, 5번"]]
+fallback = "분담은 이렇게 해 보면 어떨까요? 1·2번(문제 정의, 인터뷰 근거)은 맡아 주시고, 3번(핵심 기능)은 같이, 4·5번(사례, 지표·일정)은 제가 할게요. 다르게 나누고 싶으시면 말씀해 주세요."
 
 [[scene]]
 id = "coop_help"
@@ -34,6 +44,8 @@ speaker = "coworker"
 channel = "dm"
 element = "협력 태도"
 message = "비슷한 서비스 사례를 찾는데 기준이 헷갈려요. 10분만 같이 봐줄 수 있을까요?"
+must_include = [["사례"], ["10분"]]
+fallback = "비슷한 서비스 사례를 찾는데 기준이 헷갈려요. 10분만 같이 봐줄 수 있을까요?"
 
 [[scene]]
 id = "resp_delay"
@@ -50,6 +62,8 @@ speaker = "lead"
 channel = "team"
 element = "유연성"
 message = "대표님과 이야기해 보니 대상을 바꿔야겠어요. 첫 참여자 말고 3개월 넘게 모임에 안 나온 사용자로 가 주세요. 마감은 그대로예요."
+must_include = [["3개월"], ["마감"]]
+fallback = "대표님과 이야기해 보니 대상을 바꿔야겠어요. 첫 참여자 말고 3개월 넘게 모임에 안 나온 사용자로 가 주세요. 마감은 그대로예요."
 
 [[scene]]
 id = "respect_review"
@@ -58,8 +72,10 @@ speaker = "coworker"
 channel = "dm"
 element = "존중·소통"
 message = "자기 파트를 공유하며 리뷰를 부탁한다. 공유한 핵심 기능에 '재참여 시 할인되는 유료 멤버십'이 들어 있다. (운영 정책과 어긋난다는 사실은 말하지 않는다)"
-# 이 장면에서 동료 파트가 공유 문서에 채워진다(F-13). 내용은 coworker_parts.toml.
+# 이 장면에서 동료 파트가 공유 문서에 채워진다(F-13). 내용은 coworker_parts.toml(코드가 원문 그대로 붙임).
 shares_coworker_parts = true
+must_include = [["리뷰", "봐주", "확인"]]
+fallback = "제 작업 내용을 공유 문서에 올렸어요. 한번 리뷰해 주실 수 있을까요?"
 
 [[scene]]
 id = "deadline_report"
@@ -68,3 +84,5 @@ speaker = "lead"
 channel = "team"
 element = ""
 message = "마감입니다. 기획안을 제출하고 진행 내용을 보고해 달라고 요청한다."
+must_include = [["제출"], ["보고", "공유"]]
+fallback = "마감 시간입니다. 기획안을 제출하고 진행한 내용을 보고해 주세요."

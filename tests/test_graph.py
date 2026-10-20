@@ -5,7 +5,7 @@ from app import graph, persona, store
 
 
 def _fake(monkeypatch):
-    async def fake_speak(role, sid, minute, task, channels, use_tools=True):
+    async def fake_speak(role, sid, minute, task, channels, use_tools=True, **_kwargs):
         return f"{role}:{task[:10]}"
 
     async def fake_business(tool, args):

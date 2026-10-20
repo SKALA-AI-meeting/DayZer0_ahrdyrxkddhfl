@@ -29,7 +29,8 @@ def chat_model(temperature: float) -> ChatOpenAI:
                       timeout=config()["agent_loop"]["task_timeout_seconds"])
 
 
-def _trace(record: dict) -> None:
+def trace(record: dict) -> None:
+    """호출·검증 기록을 data/trace.jsonl에 한 줄로 남긴다(Observability)."""
     TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with TRACE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -54,14 +55,14 @@ async def ainvoke(runnable, payload, node: str, session_id: str = ""):
         try:
             result = await runnable.ainvoke(payload)
         except RETRYABLE as exc:
-            _trace({"ts": time.time(), "session": session_id, "node": node, "attempt": attempt,
+            trace({"ts": time.time(), "session": session_id, "node": node, "attempt": attempt,
                     "error": type(exc).__name__})
             if attempt == attempts:
                 raise
             await asyncio.sleep(llm_cfg["retry_backoff_seconds"] * attempt)
             continue
         usage = getattr(result, "usage_metadata", None) or {}
-        _trace({"ts": time.time(), "session": session_id, "node": node, "attempt": attempt,
+        trace({"ts": time.time(), "session": session_id, "node": node, "attempt": attempt,
                 "latency_ms": round((time.perf_counter() - started) * 1000),
                 "input_tokens": usage.get("input_tokens"),
                 "output_tokens": usage.get("output_tokens")})

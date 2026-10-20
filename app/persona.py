@@ -1,12 +1,9 @@
 """동료(이도현)·팀장(한서윤)·어시스턴트의 말을 만든다.
 
 - 대화 맥락은 최근 메시지를 history_token_budget 안에서 잘라 넣는다(Harness: Context).
-- 출력에 판정 표현이 있으면 한 번 다시 만들고, 그래도 있으면 안내문으로 바꾼다(F-24).
+- 실제 문장 생성과 검증(판정 발언·필수 내용·출처)은 발화 Graph(app/speak_graph.py)가 한다.
 """
-from langchain_core.messages import HumanMessage
-
-from app import agent_loop, clock, guard, store
-from app.mcp_client import doc_tools
+from app import clock, speak_graph, store
 from app.settings import PART_TITLES, config, prompt
 
 NAMES = {"candidate": "지원자", "coworker": "이도현", "lead": "한서윤 팀장",
@@ -43,8 +40,9 @@ def assignment_text(assignment: dict[str, str]) -> str:
 
 
 async def speak(role: str, session_id: str, minute: float, task: str,
-                channels: tuple[str, ...], use_tools: bool = True) -> str:
-    """페르소나(coworker | lead)의 다음 메시지를 만든다.
+                channels: tuple[str, ...], use_tools: bool = True,
+                must_include: list[list[str]] | None = None, fallback: str | None = None) -> str:
+    """페르소나(coworker | lead)의 다음 메시지를 발화 Graph로 만든다(생성 → 코드 검증 → 재시도/대체).
 
     Args:
         role: "coworker" 또는 "lead".
@@ -53,23 +51,17 @@ async def speak(role: str, session_id: str, minute: float, task: str,
         task: 이번에 할 일(장면의 전달 내용 또는 "지원자 메시지에 답하기").
         channels: 맥락으로 볼 채널.
         use_tools: 회사 문서 검색 도구를 줄지 여부.
+        must_include: 장면 대사에 꼭 들어가야 할 사실(F-23 검증용).
+        fallback: 검증을 끝내 통과하지 못했을 때 쓸 문장. 없으면 config의 기본 대체 문장.
     """
     session = store.get_session(session_id)
     system = (f"{prompt(role)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
               f"- 현재 분담: {assignment_text(session['assignment'])}\n"
               f"- 지금 볼 수 있는 회사 문서: {docs_text(minute)} (이 목록에 없는 문서는 아직 볼 수 없다)")
-    human = HumanMessage(f"최근 대화:\n{transcript(session_id, channels)}\n\n지금 할 일: {task}\n"
-                         "메신저에 보낼 메시지 본문만 써라.")
-    for _ in range(2):   # 판정 표현이 나오면 한 번 다시 생성
-        if use_tools:
-            async with doc_tools(minute) as tools:
-                text, _ = await agent_loop.run(system, [human], tools,
-                                               config()["llm"]["persona_temperature"],
-                                               f"persona.{role}", session_id)
-        else:
-            text, _ = await agent_loop.run(system, [human], [],
-                                           config()["llm"]["persona_temperature"],
-                                           f"persona.{role}", session_id)
-        if not guard.violates(text):
-            return text.strip()
-    return guard.notice()
+    human = (f"최근 대화:\n{transcript(session_id, channels)}\n\n지금 할 일: {task}\n"
+             "메신저에 보낼 메시지 본문만 써라.")
+    result = await speak_graph.speak(
+        session_id=session_id, node=f"persona.{role}", system=system, human=human, minute=minute,
+        use_tools=use_tools, must_include=must_include,
+        fallback=fallback or config()["verify"]["fallback_reply"])
+    return result["text"]
