@@ -155,6 +155,10 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
     must_say_duration = any(o in p for opts in must_include for o in opts for p in stale)
     if 0 < minute < float("inf") and not must_say_duration and any(p in text for p in stale):
         return f"stale_time:{clock.deadline_text(minute, scenario or None)}"   # 킥오프의 "2시간 뒤"를 그대로 반복
+    if 0 < minute < float("inf") and any(p in text for p in config()["verify"]["stale_doc_phrases"]):
+        shared = [d for d in docs.available(company, minute, scenario or None) if d["available_from_minute"] > 0]
+        if shared:   # 늦게 공개되는 문서가 이미 공개됐는데 아직 안 온 것처럼 말함
+            return f"stale_doc:{shared[0]['title']}"
     if use_tools and required_tool and required_tool not in (called_tools or []):
         return "not_read"   # 검토를 부탁받았는데 공유 문서를 실제로 읽지 않음
     if use_tools and tools_used == 0 and any(p in text for p in config()["verify"]["no_lookup_phrases"]):
@@ -199,6 +203,8 @@ FEEDBACK = {
     "deferral": "확인하겠다고만 하고 실제로 확인하지 않았다. 지금 도구를 호출해 확인한 뒤, 확인한 내용으로 바로 답하라.",
     "stale_time": "세션 시작 때 말한 '2시간 뒤'를 지금도 그대로 말했다. 지금은 {x}이다. "
                   "이 시각에 맞게 말하거나, 시간을 말할 필요가 없으면 빼고 다시 써라.",
+    "stale_doc": "'{x}' 문서는 이미 공유됐다. 아직 안 왔거나 곧 공유된다고 말하지 말고, "
+                 "지금 회사 문서에서 바로 열어 볼 수 있다고 알려라.",
     "citation": "방금 답에서 '{x}' 문서를 근거로 들었지만 이번에 그 문서를 읽지 않았다. "
                 "도구로 확인하거나, 확인하지 않은 문서는 언급하지 말고 다시 써라.",
 }

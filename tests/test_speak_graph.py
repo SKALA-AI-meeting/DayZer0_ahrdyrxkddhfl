@@ -104,3 +104,11 @@ def test_stale_deadline_is_rejected_after_kickoff():
 
     # 중간점검 미미함: 킥오프가 재시도로 0분 뒤에 실행돼도 필수 내용 "2시간"은 막지 않는다
     assert sg.check("2시간 뒤 2~3쪽 기획안을 받겠습니다", [["2시간"], ["기획안"]], [], False, minute=0.3) == "ok"
+
+
+# 회귀: 01:05에 설문 요약이 공개됐는데 01:07에 팀장이 "빨리 공유되면 말씀드리겠습니다"라고 답했다
+def test_stale_doc_is_rejected_after_release():
+    say = "알림이 빨리 공유되면 말씀드리겠습니다"
+    assert sg.check(say, [], [], False, minute=55, scenario="pixel") == "ok"            # 공개 전에는 정상
+    assert sg.check(say, [], [], False, minute=67, scenario="pixel") == "stale_doc:유저 설문 요약"
+    assert sg.check("완성되면 공유할게요", [], [], False, minute=67, scenario="pixel") == "ok"  # 자기 파트 공유 약속은 정상

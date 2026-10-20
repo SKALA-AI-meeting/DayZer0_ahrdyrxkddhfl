@@ -77,6 +77,15 @@ def docs_text(minute: float, company: str = "", pack: str | None = None) -> str:
     return ", ".join(f"{d['title']}(doc_id={d['id']})" for d in docs.available(company, minute, pack))
 
 
+def shared_late_docs_text(minute: float, company: str = "", pack: str | None = None) -> str:
+    """늦게 공개되는 문서 중 이미 공개된 것. 대화에 '늦게 공유됩니다'만 남아 있어도 공개 사실을 알게 한다."""
+    late = [d for d in docs.available(company, minute, pack) if d["available_from_minute"] > 0]
+    if not late:
+        return ""
+    names_ = ", ".join(f"'{d['title']}'({clock.format_minute(d['available_from_minute'])}에 공유됨)" for d in late)
+    return f"- 늦게 공유된다던 문서 중 이미 공유된 것: {names_}. 지금 회사 문서에서 볼 수 있다\n"
+
+
 def is_review_request(text: str) -> bool:
     """지원자 메시지가 기획안 검토를 부탁하는지 (표현 목록은 config [verify].review_request_phrases)."""
     return any(p in text for p in config()["verify"]["review_request_phrases"])
@@ -111,6 +120,7 @@ async def speak(role: str, session_id: str, minute: float, task: str,
     system = (f"{prompt(role, pack)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
               f"- 현재 분담: {assignment_text(session['assignment'], pack)}\n"
               f"- 마감: {clock.deadline_text(minute, pack)}\n"
+              f"{shared_late_docs_text(minute, session['company'], pack)}"
               f"- 지금 볼 수 있는 회사 문서: {docs_text(minute, session['company'], pack)} (이 목록에 없는 문서는 아직 볼 수 없다)")
     if role == "coworker":   # 대화가 요약돼도 누구의 아이디어인지 잃지 않게 동료 자신의 공유분을 밝혀 둔다
         mine = {k.split(":")[1]: v for k, v in store.get_parts(session_id).items() if k.startswith("coworker:")}
