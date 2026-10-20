@@ -68,6 +68,32 @@ def test_report_has_no_scores_and_marks_unobserved():
     assert secs["유연성"]["note"] == report.NOT_HAPPENED
 
 
+def test_unobserved_lists_candidate_messages_in_window_without_judgement():
+    # 관찰 없음이면 구간 안 지원자 메시지 위치만 링크한다(구간 밖·AI 메시지는 제외).
+    sid = store.create_session("x")
+    store.add_message(sid, "team", "candidate", "이벤트 전 메시지", 60)
+    store.add_message(sid, "team", "lead", "대상이 바뀌었어요", 70)
+    inside = store.add_message(sid, "dm", "candidate", "좋은 아이디어네요", 118)
+    spec = {"name": "유연성", "situation": "대상 변경", "scene": "flex_change",
+            "window_end_minute": 120, "candidate_keywords": ["대상"], "checks": []}
+    result = asyncio.run(observe.observe_element(sid, spec, {"flex_change": 70}, mode="rules"))
+    assert [f["id"] for f in result["followups"]] == [inside]
+    section = report.build_body(sid, [result])["sections"][0]
+    assert section["note"] == report.NOT_OBSERVED
+    assert section["followups"] == [{"id": inside, "when": "01:58"}]
+
+
+def test_observed_section_has_no_followup_links():
+    sid = store.create_session("x")
+    mid = store.add_message(sid, "team", "candidate", "대상을 바꿀게요", 72)
+    spec = {"name": "유연성", "situation": "대상 변경", "scene": "flex_change",
+            "window_end_minute": 120, "candidate_keywords": ["대상"], "checks": []}
+    result = asyncio.run(observe.observe_element(sid, spec, {"flex_change": 70}, mode="rules"))
+    result["checks"][0].update(quote="대상을 바꿀게요", behavior="")
+    section = report.build_body(sid, [result])["sections"][0]
+    assert section["observed"] and "followups" not in section and mid
+
+
 def test_report_retries_then_fails(monkeypatch):
     sid = store.create_session("x")
     calls = []

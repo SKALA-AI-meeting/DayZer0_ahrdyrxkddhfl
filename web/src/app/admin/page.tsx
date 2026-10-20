@@ -28,7 +28,7 @@ export default function AdminHome() {
   const [alias, setAlias] = useState("");
   const [email, setEmail] = useState("");
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [scenario, setScenario] = useState("");
+  const [mine, setMine] = useState<{ current: Scenario; locked: boolean } | null>(null);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<{ alias: string; url: string } | null>(null);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
@@ -37,6 +37,7 @@ export default function AdminHome() {
     try {
       setMe(await api("/admin/me", {}, true));
       setScenarios(await api("/admin/scenarios", {}, true));
+      setMine(await api("/admin/scenario", {}, true));
       setRows(await api("/admin/candidates", {}, true));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) router.push("/admin/login");
@@ -60,12 +61,21 @@ export default function AdminHome() {
     }
   }
 
+  async function chooseScenario(id: string) {
+    setError("");
+    try {
+      setMine(await api("/admin/scenario", { method: "PUT", body: JSON.stringify({ scenario: id }) }, true));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function invite(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     try {
       const r = await api<{ invite_path: string }>("/admin/invites", {
-        method: "POST", body: JSON.stringify({ alias, email, scenario }),
+        method: "POST", body: JSON.stringify({ alias, email }),
       }, true);
       setCreated({ alias, url: origin + r.invite_path });
       setAlias(""); setEmail("");
@@ -88,15 +98,25 @@ export default function AdminHome() {
         <form className="card" onSubmit={invite}>
           <h2>지원자 초대</h2>
           <p className="muted small">실명 대신 별칭을 씁니다. 링크는 지원자 한 명 전용이며 72시간 뒤 만료됩니다.</p>
+          {mine && (
+            <div className="notice small" style={{ marginBottom: 12 }}>
+              업무 시나리오: <b>{mine.current.company} · {mine.current.task_title}</b>
+              {mine.locked ? (
+                <span className="muted"> — 이미 지원자를 초대해 바꿀 수 없어요. 모든 지원자가 같은 조건에서 평가받도록 한 기업은 한 시나리오만 씁니다.</span>
+              ) : (
+                <>
+                  {" "}
+                  <select value={mine.current.id} onChange={(e) => chooseScenario(e.target.value)} style={{ maxWidth: 300 }}>
+                    {scenarios.map((s) => <option key={s.id} value={s.id}>{s.company} · {s.task_title}</option>)}
+                  </select>
+                  <span className="muted"> 첫 지원자를 초대하면 고정됩니다.</span>
+                </>
+              )}
+            </div>
+          )}
           <div className="row">
             <input placeholder="지원자 별칭 (예: 지원자-01)" value={alias} onChange={(e) => setAlias(e.target.value)} />
             <input placeholder="이메일 (기록용, 선택)" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <select value={scenario} onChange={(e) => setScenario(e.target.value)} style={{ maxWidth: 260 }}
-              title="채용 건의 업무 시나리오. 같은 채용 건의 지원자는 모두 같은 시나리오를 씁니다.">
-              {scenarios.map((s, i) => (
-                <option key={s.id} value={i === 0 ? "" : s.id}>{s.company} · {s.task_title}{i === 0 ? " (기본)" : ""}</option>
-              ))}
-            </select>
             <button type="submit">초대 링크 만들기</button>
           </div>
           {created && (
@@ -132,7 +152,7 @@ export default function AdminHome() {
           </table>
         </div>
 
-        <DocAdmin />
+        <DocAdmin key={mine?.current.id} />
       </main>
     </>
   );

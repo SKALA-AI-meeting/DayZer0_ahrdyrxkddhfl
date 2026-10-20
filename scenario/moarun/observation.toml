@@ -2,7 +2,9 @@
 # - 요소·상황·관찰 포인트는 PRD 5.3, 6.4 그대로다.
 # - 체크 항목은 모두 "행동"으로 정의한다 (말투·공손함 항목 금지, PRD 15장 평가 편향).
 # - window: 이벤트 시점부터 window_end_minute까지의 지원자 메시지·문서만 본다.
-#   책임감·유연성·존중·소통은 "마감 전"을 봐야 하므로 마감(110분)까지 본다.
+#   책임감은 "마감 전에 먼저 알렸는가"를 보므로 마감(110분)까지 본다.
+#   유연성·존중·소통은 변경에 대한 반응·리뷰 답변이 마감 뒤에도 나올 수 있어 세션 끝(120분)까지 본다
+#   (PRD F-30 "이벤트마다 그 뒤의 지원자 메시지").
 # - candidate_keywords: 관련 메시지 "후보"를 넓게 찾는 용도. 키워드만으로 확정하지 않는다.
 #   후보가 0개여도 LLM은 구간 전체 메시지를 본다(키워드 누락 대비).
 # - checks: LLM이 예/아니오 + 원문 인용으로 답한다. 인용은 코드가 실제 메시지와 대조해 검증한다.
@@ -35,7 +37,7 @@ checks = [
 name = "유연성"
 scene = "flex_change"
 situation = "막판 요구사항 변경 (대상: 3개월 넘게 모임에 안 나온 사용자)"
-window_end_minute = 110
+window_end_minute = 120
 candidate_keywords = ["3개월", "3달", "석 달", "휴면", "안 나온", "미참여", "이탈", "대상", "범위", "분담", "일정"]
 checks = [
   { id = "asked_clarification", question = "지원자가 바뀐 방향의 배경이나 범위를 확인하는 질문을 했는가?" },
@@ -49,7 +51,7 @@ include_plan_document = true
 name = "존중·소통"
 scene = "respect_review"
 situation = "동료 파트에 회사 정책과 어긋나는 내용 (유료 멤버십)"
-window_end_minute = 110
+window_end_minute = 120
 candidate_keywords = ["정책", "유료", "멤버십", "할인", "결제", "과금", "올해"]
 checks = [
   { id = "noticed_error", question = "지원자가 동료 파트의 유료 멤버십이 문제라는 점을 동료에게 알렸거나, 기획안에서 그 부분을 고쳤는가?" },

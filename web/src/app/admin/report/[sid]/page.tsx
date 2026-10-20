@@ -9,6 +9,7 @@ import { api, Msg } from "@/lib/api";
 type Observed = { behavior: string; quote: string; when: string };
 type Section = {
   element: string; situation: string; observed: Observed[]; note?: string;
+  followups?: { id: number; when: string }[];
   requests?: { when: string; request: string; reuse: string }[];
 };
 type Data = { alias: string; status: string; names: Record<string, string>; pack: { company: string; task_title: string }; report: { sections: Section[]; disclaimer: string } | null;
@@ -27,8 +28,12 @@ export default function ReportPage() {
   function jump(quote: string) {
     const hit = data?.messages.find((m) => m.sender === "candidate" && m.content.includes(quote.slice(0, 20)));
     if (!hit) return;
-    setFocus(hit.id);
-    document.getElementById(`m${hit.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    jumpTo(hit.id);
+  }
+
+  function jumpTo(id: number) {
+    setFocus(id);
+    document.getElementById(`m${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   if (error) return <><Nav /><main className="page"><div className="error">{error}</div></main></>;
@@ -67,6 +72,17 @@ export default function ReportPage() {
                 </table>
               )}
               {s.note && <p className="notice small">{s.note}</p>}
+              {s.followups && (
+                <p className="muted small">
+                  {s.followups.length === 0 ? "이 상황 이후 지원자가 보낸 메시지 없음" : <>
+                    이 상황 이후 지원자가 보낸 메시지 {s.followups.length}건 (판단 없이 위치만 표시):{" "}
+                    {s.followups.map((f) => (
+                      <a key={f.id} href="#" style={{ marginRight: 8 }}
+                         onClick={(e) => { e.preventDefault(); jumpTo(f.id); }}>{f.when}</a>
+                    ))}
+                  </>}
+                </p>
+              )}
             </div>
           ))}
         </>

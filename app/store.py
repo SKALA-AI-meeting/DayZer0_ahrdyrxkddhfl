@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     consented INTEGER NOT NULL DEFAULT 0,
     scenario TEXT NOT NULL DEFAULT 'moarun'   -- 시나리오 팩(채용 건마다 하나)
 );
+-- 기업의 시나리오 팩. 같은 기업의 지원자는 모두 같은 팩을 쓴다(PRD 5.5 "조건은 모두에게 같다").
+CREATE TABLE IF NOT EXISTS company_settings (
+    company TEXT PRIMARY KEY,
+    scenario TEXT NOT NULL
+);
 -- 기업 관리자 계정(F-01). 비밀번호는 salt + PBKDF2 해시로만 저장한다.
 CREATE TABLE IF NOT EXISTS admins (
     email TEXT PRIMARY KEY,
@@ -363,6 +368,28 @@ def list_sessions(company: str) -> list[dict]:
             "SELECT id, alias, email, status, scenario, created_at FROM sessions WHERE company = ?"
             " ORDER BY created_at DESC", (company,))
         return [dict(r) for r in rows]
+
+
+def company_scenario(company: str) -> str:
+    """기업의 시나리오 팩. 정한 적이 없으면 첫 지원자의 팩(이전 데이터), 그것도 없으면 기본 팩."""
+    with connect() as conn:
+        row = conn.execute("SELECT scenario FROM company_settings WHERE company = ?", (company,)).fetchone()
+        if row is None:
+            row = conn.execute("SELECT scenario FROM sessions WHERE company = ? ORDER BY created_at LIMIT 1",
+                               (company,)).fetchone()
+    return row["scenario"] if row else default_pack()
+
+
+def company_has_candidates(company: str) -> bool:
+    """초대한 지원자가 한 명이라도 있으면 True(시나리오 변경 잠금 기준)."""
+    with connect() as conn:
+        return conn.execute("SELECT 1 FROM sessions WHERE company = ? LIMIT 1", (company,)).fetchone() is not None
+
+
+def set_company_scenario(company: str, scenario: str) -> None:
+    with connect() as conn:
+        conn.execute("INSERT INTO company_settings (company, scenario) VALUES (?, ?)"
+                     " ON CONFLICT(company) DO UPDATE SET scenario = excluded.scenario", (company, scenario))
 
 
 def create_admin(email: str, company: str, salt: str, pw_hash: str) -> bool:

@@ -91,17 +91,14 @@ def verify_token(token: str) -> dict:
     return {"email": data["email"], "company": data["company"]}
 
 
-def create_invite(company: str, alias: str, email: str, scenario: str = "") -> dict:
+def create_invite(company: str, alias: str, email: str) -> dict:
     """1회용 초대 링크를 만든다(F-02). 실명 대신 별칭을 쓴다(PRD 5.5).
 
-    scenario는 채용 건의 시나리오 팩(기업 맞춤 시나리오). 비우면 기본 팩(공통 PRD 시나리오).
+    시나리오 팩은 초대마다 고르지 않고 기업에 정해진 팩을 쓴다(같은 기업 지원자는 같은 조건).
     """
     if not alias.strip():
         raise AuthError("지원자 별칭을 입력해 주세요.")
-    from app.settings import default_pack, pack_ids
-    scenario = scenario or default_pack()
-    if scenario not in pack_ids():
-        raise AuthError(f"없는 시나리오입니다: {scenario}")
+    scenario = store.company_scenario(company)
     token = secrets.token_urlsafe(24)
     expires = time.time() + config()["session"]["invite_ttl_hours"] * SECONDS_PER_HOUR
     sid = store.create_session(alias.strip(), company=company, email=email.strip(),

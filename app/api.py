@@ -78,7 +78,10 @@ class LoginIn(BaseModel):
 class InviteIn(BaseModel):
     alias: str
     email: str = ""
-    scenario: str = ""      # 시나리오 팩(채용 건). 비우면 기본 팩
+
+
+class ScenarioIn(BaseModel):
+    scenario: str
 
 
 @app.post("/api/auth/signup")
@@ -105,7 +108,7 @@ def me(admin: dict = Depends(_admin)) -> dict:
 @app.post("/api/admin/invites")
 def create_invite(body: InviteIn, admin: dict = Depends(_admin)) -> dict:
     try:
-        return auth.create_invite(admin["company"], body.alias, body.email, body.scenario)
+        return auth.create_invite(admin["company"], body.alias, body.email)
     except auth.AuthError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -122,6 +125,23 @@ def _pack_public(pack: str) -> dict:
 def scenarios(admin: dict = Depends(_admin)) -> list[dict]:
     """고를 수 있는 시나리오 팩 목록(기업 맞춤 시나리오). 첫 번째가 기본(공통 PRD)."""
     return [_pack_public(p) for p in settings.pack_ids()]
+
+
+@app.get("/api/admin/scenario")
+def company_scenario(admin: dict = Depends(_admin)) -> dict:
+    """이 기업의 시나리오. 지원자를 한 명이라도 초대했으면 잠긴다(PRD 5.5 같은 조건)."""
+    return {"current": _pack_public(store.company_scenario(admin["company"])),
+            "locked": store.company_has_candidates(admin["company"])}
+
+
+@app.put("/api/admin/scenario")
+def set_company_scenario(body: ScenarioIn, admin: dict = Depends(_admin)) -> dict:
+    if body.scenario not in settings.pack_ids():
+        raise HTTPException(400, f"없는 시나리오입니다: {body.scenario}")
+    if store.company_has_candidates(admin["company"]):
+        raise HTTPException(409, "이미 초대한 지원자가 있어 시나리오를 바꿀 수 없습니다. 같은 채용의 지원자는 모두 같은 시나리오를 씁니다.")
+    store.set_company_scenario(admin["company"], body.scenario)
+    return company_scenario(admin)
 
 
 @app.get("/api/admin/candidates")
@@ -285,7 +305,7 @@ def set_task(token: str, part: str, body: TaskIn) -> dict:
 async def read_doc(token: str, doc_id: str) -> dict:
     """회사 문서 열람(F-15): rag-mcp Resource로 원문을 읽는다. 공개 시각 판단은 MCP 서버가 한다."""
     s = _candidate(token, need_active=False)
-    doc = {d["id"]: d for d in docs_module.all_docs(s["company"])}.get(doc_id)
+    doc = {d["id"]: d for d in docs_module.all_docs(s["company"], s["scenario"])}.get(doc_id)
     if doc is None:
         raise HTTPException(404, "없는 문서입니다.")
     try:
@@ -334,7 +354,7 @@ class DecisionIn(BaseModel):
 @app.get("/api/admin/docs")
 def list_docs(admin: dict = Depends(_admin)) -> dict:
     """현재 문서 목록(시나리오 + 승인된 기업 문서)과 등록 요청 목록."""
-    return {"docs": docs_module.all_docs(admin["company"]),
+    return {"docs": docs_module.all_docs(admin["company"], store.company_scenario(admin["company"])),
             "requests": store.doc_requests(admin["company"])}
 
 

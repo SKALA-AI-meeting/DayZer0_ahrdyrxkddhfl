@@ -1,4 +1,6 @@
 """시나리오 팩: 데이터만 갈아끼우면 다른 회사 시뮬레이션이 된다(에이전트 코드는 그대로)."""
+import time
+
 from fastapi.testclient import TestClient
 
 from app import settings, store
@@ -41,12 +43,48 @@ def test_rag_searches_only_the_sessions_pack():
         pass
 
 
-def test_invite_with_scenario_and_poll_names():
-    r = client.post("/api/auth/signup", json={"email": "g@px.kr", "password": "password123", "company": "픽셀HR"})
-    H = {"Authorization": f"Bearer {r.json()['token']}"}
+def _signup(email: str, company: str) -> dict:
+    r = client.post("/api/auth/signup", json={"email": email, "password": "password123", "company": company})
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+def test_scenario_is_fixed_per_company():
+    # PRD 5.5 "조건은 모두에게 같다": 한 기업의 지원자는 모두 같은 시나리오. 첫 초대 뒤에는 못 바꾼다.
+    H = _signup("lock@px.kr", "잠금HR")
+    assert client.get("/api/admin/scenario", headers=H).json()["current"]["id"] == "moarun"
+    assert client.put("/api/admin/scenario", json={"scenario": "없는팩"}, headers=H).status_code == 400
+    assert client.put("/api/admin/scenario", json={"scenario": "pixel"}, headers=H).status_code == 200
+    client.post("/api/admin/invites", json={"alias": "A", "scenario": "moarun"}, headers=H)   # 초대마다 고르는 값은 무시
+    client.post("/api/admin/invites", json={"alias": "B"}, headers=H)
+    assert {r["scenario"] for r in client.get("/api/admin/candidates", headers=H).json()} == {"pixel"}
+    state = client.get("/api/admin/scenario", headers=H).json()
+    assert state["locked"] and state["current"]["company"] == "픽셀게임즈"
+    assert client.put("/api/admin/scenario", json={"scenario": "moarun"}, headers=H).status_code == 409
+    # 다른 기업은 영향 없음(F-01)
+    assert client.get("/api/admin/scenario", headers=_signup("other@px.kr", "다른HR")).json()["current"]["id"] == "moarun"
+
+
+def test_candidate_can_read_pack_only_doc():
+    # 회귀: 문서 열람 API가 팩을 넘기지 않아 픽셀게임즈 지원자가 '유저 설문 요약'을 열면 404였다
+    sid = store.create_session("C", company="문서HR", scenario="pixel", invite_token="tok-pixel-doc",
+                               invite_expires_at=time.time() + 3600)
+    store.update_session(sid, sim_seconds=70 * 60)   # 설문 요약 공개(01:05) 이후
+    r = client.get("/api/invite/tok-pixel-doc/docs/survey")
+    assert r.status_code == 200 and r.json()["title"] == "유저 설문 요약"
+
+
+def test_admin_docs_follow_company_pack():
+    H = _signup("docs@px.kr", "문서목록HR")
+    client.put("/api/admin/scenario", json={"scenario": "pixel"}, headers=H)
+    titles = {d["title"] for d in client.get("/api/admin/docs", headers=H).json()["docs"]}
+    assert "유저 설문 요약" in titles and "사용자 인터뷰 요약" not in titles
+
+
+def test_invite_uses_company_scenario_and_poll_names():
+    H = _signup("g@px.kr", "픽셀HR")
     assert [p["id"] for p in client.get("/api/admin/scenarios", headers=H).json()] == ["moarun", "pixel"]
-    assert client.post("/api/admin/invites", json={"alias": "x", "scenario": "없는팩"}, headers=H).status_code == 400
-    token = client.post("/api/admin/invites", json={"alias": "유저A", "scenario": "pixel"},
+    client.put("/api/admin/scenario", json={"scenario": "pixel"}, headers=H)
+    token = client.post("/api/admin/invites", json={"alias": "유저A"},
                         headers=H).json()["invite_path"].rsplit("/", 1)[1]
     info = client.get(f"/api/invite/{token}").json()
     assert info["pack"]["coworker_name"] == "윤하늘" and info["pack"]["service"] == "픽셀 레전드"

@@ -152,6 +152,8 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     messages = _window_messages(session_id, start, end)
     plan = _candidate_plan(session_id) if spec.get("include_plan_document") else None
     hits = _keyword_hits(messages, spec["candidate_keywords"])
+    # 관찰 구간 안의 지원자 메시지 위치(판단 없음). 관찰 없음일 때 담당자가 원문을 직접 보도록 리포트에 링크한다.
+    base["followups"] = [{"id": m["id"], "minute": m["minute"]} for m in messages if m["sender"] == "candidate"]
 
     if mode == "rules":   # A: 키워드에 걸린 지원자 메시지가 있으면 관련 행동 있음
         checks = [{"check_id": "keyword", "answer": "yes" if hits else "no",

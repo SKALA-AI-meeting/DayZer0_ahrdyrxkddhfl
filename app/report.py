@@ -49,6 +49,9 @@ def build_body(session_id: str, results: list[dict]) -> dict:
             section["note"] = NOT_HAPPENED
         if not section["observed"] and "note" not in section and not section.get("requests"):
             section["note"] = NOT_OBSERVED
+            # 판단 없이 위치만: 그 상황 이후(관찰 구간) 지원자가 보낸 메시지. 해석은 담당자가 한다(PRD 5.5).
+            section["followups"] = [{"id": f["id"], "when": clock.format_minute(f["minute"])}
+                                    for f in r.get("followups", [])]
         sections.append(section)
     return {"session_id": session_id, "sections": sections,
             "disclaimer": "이 리포트는 관찰 기록입니다. 판단은 채용 담당자가 합니다."}
