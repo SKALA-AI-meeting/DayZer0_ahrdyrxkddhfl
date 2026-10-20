@@ -41,21 +41,102 @@ cd web && npm run dev                      # http://localhost:3000
 
 ## 2. 구조
 
+### 시스템 아키텍처
+
+```mermaid
+flowchart TB
+    FE["Next.js 15 Frontend<br/>지원자 가상 오피스 · 관리자 · 리포트"]
+    GW["API Gateway · FastAPI<br/>app/api.py<br/>토큰 인증 · 라우팅"]
+    AUTH["Auth · app/auth.py<br/>PBKDF2 해시 · HMAC 토큰 발급/검증<br/>지원자 초대 토큰 72시간"]
+    ENG["Session Engine<br/>engine.py · clock.py<br/>활성 시간 시계 · 장면 정시 1회 실행"]
+
+    FE -->|"/api 프록시 · 2초마다 poll"| GW
+    GW <-->|"가입·로그인 · 토큰 검증"| AUTH
+    GW -->|"tick · 지원자 메시지"| ENG
+
+    subgraph AGENT["AI Agent · LangGraph (gateway와 같은 프로세스)"]
+        direction LR
+        SG["세션 Graph<br/>graph.py<br/>장면 · 분업 협상 · 답장 라우팅"]
+        SPK["발화 Graph<br/>speak_graph.py<br/>생성 → 도구 → 코드 검증 → 재생성/대체"]
+        AST["AI 어시스턴트<br/>assistant.py<br/>출처 표시 · 문서 편집 불가"]
+        DOC["문서 등록 Graph<br/>doc_graph.py<br/>마스킹 → interrupt 승인 → 등록"]
+        OBS["관찰 · 리포트<br/>observe.py · report.py<br/>판별 → 인용·함의 검증 → 근거 정리"]
+    end
+
+    ENG -->|"장면 시각 도달 · 지원자 메시지"| SG
+    SG -->|"동료·팀장 발화"| SPK
+    GW -->|"어시스턴트 질문"| AST
+    AST --> SPK
+    GW -->|"관리자: 문서 등록 요청·승인"| DOC
+    ENG -->|"세션 종료 → 백그라운드 작업"| OBS
+
+    subgraph MCP["MCP stdio · 직접 구축 2개"]
+        direction LR
+        BIZ["business-mcp<br/>조회: 세션 상태 · 태스크 · 공유 문서 · 관찰<br/>변경: assign_tasks · update_task_status · save_observation"]
+        RAG["rag-mcp<br/>조회: list · search · read_company_doc<br/>변경: register_company_doc (승인 토큰 필수)<br/>Resource: docs:// · scenario://"]
+    end
+
+    SPK -->|"문서 검색·읽기 · 공유 문서 읽기"| MCP
+    SG -->|"분담 확정 · 동료 카드 완료"| BIZ
+    OBS -->|"관찰 결과 저장"| BIZ
+    DOC -->|"승인 후 등록"| RAG
+    GW -->|"문서 원문 열람 · 공개 시각 확인"| RAG
+
+    LLM["OpenAI gpt-4o-mini<br/>발화 · 판별 · 함의 검증 · 근거 정리"]
+    EMB["OpenAI text-embedding-3-small"]
+    SPK -.->|"LLM 호출"| LLM
+    OBS -.->|"LLM 호출"| LLM
+
+    subgraph DB["SQLite · data/dayzero.sqlite3 (기업별 데이터 분리)"]
+        direction LR
+        T1["세션<br/>sessions · messages<br/>plan_parts · tasks · scene_runs"]
+        T2["관찰 · 리포트<br/>observations · reports<br/>judge_cache"]
+        T3["기업 · 인증<br/>admins · company_settings"]
+        T4["회사 문서<br/>company_docs · doc_requests<br/>doc_views"]
+    end
+    VEC["Vector Index<br/>doc_chunks · query_embeddings<br/>SQLite + 코사인 유사도"]
+
+    BIZ --> T1
+    BIZ --> T2
+    RAG --> T4
+    GW --> T3
+    RAG -->|"벡터 검색 · 실패 시 키워드"| VEC
+    VEC -.->|"색인·질의 임베딩"| EMB
+
+    FILES["scenario/ 팩 · prompts/*.md · config.toml<br/>코드 밖의 시나리오 · 지시문 · 숫자"]
+    OBSV["Observability<br/>LangSmith (metadata session_id · node)<br/>data/trace.jsonl"]
+    AGENT -.-> FILES
+    AGENT -.-> OBSV
+
+    classDef fe fill:#d9f2d0,stroke:#6aa84f,color:#000
+    classDef gw fill:#f8d7da,stroke:#c0392b,color:#000
+    classDef side fill:#fff2cc,stroke:#d6b656,color:#000
+    classDef agent fill:#dae8fc,stroke:#6c8ebf,color:#000
+    classDef mcp fill:#ffe6a7,stroke:#d6a01e,color:#000
+    classDef ai fill:#e1d5e7,stroke:#9673a6,color:#000
+    classDef db fill:#e8eef7,stroke:#7a8fb3,color:#000
+    classDef vec fill:#ffe0b2,stroke:#e69138,color:#000
+    classDef etc fill:#f3f3f3,stroke:#999999,color:#000
+    class FE fe
+    class GW gw
+    class AUTH,ENG side
+    class SG,SPK,AST,DOC,OBS agent
+    class BIZ,RAG mcp
+    class LLM,EMB ai
+    class T1,T2,T3,T4 db
+    class VEC vec
+    class FILES,OBSV etc
+    style AGENT fill:#f5f8fd,stroke:#c0392b,stroke-dasharray: 6 4
+    style MCP fill:#fffaf0,stroke:#d6a01e
+    style DB fill:#f7f9fc,stroke:#7a8fb3
 ```
-브라우저 ── web (Next.js, 화면만) ──/api 프록시──▶ gateway (FastAPI, app/api.py)
-                                                   │  인증(관리자 토큰 · 지원자 초대 토큰)
-                                                   ▼
-                                       agent (LangGraph, 같은 프로세스)
-                         ┌─────────────────┬────────────────────┬────────────────────┐
-                    세션 Graph          발화 Graph            문서 등록 Graph      관찰·리포트
-                 (장면·분업·답장)   (생성→검증→재생성/대체)   (interrupt 승인)    (하이브리드 판별)
-                         └────────┬────────┴──────────┬─────────┘
-                       MCP stdio  ▼                    ▼  MCP stdio
-              business-mcp (직접 구축)           rag-mcp (직접 구축)
-              세션·태스크·공유 문서·관찰 기록      회사 문서 검색·원문 Resource·등록
-                         └──────────────┬─────────────┘
-                                 SQLite (data/)          OpenAI gpt-4o-mini · LangSmith
-```
+
+**핵심 흐름: 2시간 가상 업무를 시간에 맞춰 진행하고, AI가 만든 것은 코드가 검증한 뒤에만 내보냄**
+- 화면이 2초마다 poll하면 엔진이 **활성 시간만** 시계에 쌓고, 정해진 시각의 장면(킥오프·분업·이벤트 4개·마감)을 **한 번씩만** 실행합니다(F-19, F-23).
+- 동료·팀장·어시스턴트의 말은 **발화 Graph**가 만듭니다. 회사 정보는 rag-mcp로 실제로 찾아 읽고, 판정 발언·필수 내용·출처·시각 같은 **코드 검증**을 통과해야 나갑니다. 실패하면 이유를 알려 재생성하고, 끝내 실패하면 사실을 지어내지 않는 대체 문장을 보냅니다.
+- 세션이 끝나면 **관찰·리포트**가 백그라운드에서 요소별로 판별합니다. 인용 원문 대조와 좁은 함의 검증을 통과한 근거만 리포트에 넣고, 점수 없이 원문·시각만 보입니다. 실패하면 2회 재시도 후 "실패"와 trace 위치를 남깁니다.
+- 회사 문서 등록 같은 **변경 작업**은 interrupt로 멈춰 관리자 승인을 기다리고, 승인 토큰이 있어야 rag-mcp가 실행합니다(F-06).
+- 시나리오·지시문·숫자는 모두 코드 밖 파일이라, **데이터(시나리오 팩)만 바꾸면 다른 회사 시뮬레이션**이 됩니다.
 
 | 폴더 | 내용 |
 |---|---|
