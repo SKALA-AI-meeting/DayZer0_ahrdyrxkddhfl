@@ -84,3 +84,11 @@ def test_giving_up_without_lookup_is_no_lookup():
     text = "죄송하지만 그 정보는 제공할 수 없습니다."
     assert sg.check(text, [], [], True, tools_used=0) == "no_lookup"
     assert sg.check(text, [], [], True, tools_used=1) == "ok"      # 찾아보고도 없으면 그렇게 말해도 됨
+
+
+def test_coworker_claiming_unshared_work_is_caught():
+    # 공유(01:30) 전인데 "정리해봤는데"처럼 결과물을 이미 만든 것처럼 말하면 실패
+    text = "지금 비슷한 서비스 사례를 찾고 있어요. 몇 가지 사례를 정리해봤는데 같이 볼까요?"
+    assert sg.check(text, [], [], True, tools_used=0, unshared=True) == "unshared_claim"
+    assert sg.check("지금 4번 사례를 찾는 중이에요.", [], [], True, tools_used=0, unshared=True) == "ok"
+    assert sg.check(text, [], [], True, tools_used=0, unshared=False) == "ok"   # 공유 뒤에는 대상 아님

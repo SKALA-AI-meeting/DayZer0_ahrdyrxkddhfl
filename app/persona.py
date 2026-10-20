@@ -117,5 +117,7 @@ async def speak(role: str, session_id: str, minute: float, task: str,
         use_tools=use_tools, must_include=must_include, company=session["company"],
         plan_access=use_tools,   # 동료·팀장은 공유 문서를 읽을 수 있다(편집은 지원자만)
         required_tool="read_shared_plan" if review else "",   # 검토 요청이면 실제로 읽었는지 검증
+        # 동료 파트가 아직 공유 전이면 결과물을 지어내지 않는지 검증
+        unshared=role == "coworker" and not any(k.startswith("coworker:") for k in store.get_parts(session_id)),
         fallback=fallback or config()["verify"]["fallback_reply"])
     return result["text"]
