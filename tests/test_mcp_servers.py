@@ -51,3 +51,15 @@ def test_read_shared_plan_returns_candidate_and_coworker_text():
     parts = {p["part"]: p for p in business.read_shared_plan(sid)["parts"]}
     assert parts["1"]["candidate_text"] == "문제: 재참여율 22%" and parts["1"]["owner"] == "candidate"
     assert parts["4"]["coworker_text"] == "사례 A, B"
+
+
+def test_doc_resource_gated_by_session_clock():
+    sid = store.create_session("지원자")
+    store.update_session(sid, sim_seconds=30 * 60)
+    with pytest.raises(PermissionError):
+        rag.read_doc_resource(sid, "interviews")          # 01:05 전
+    assert "22%" in rag.read_doc_resource(sid, "metrics")
+    store.update_session(sid, sim_seconds=66 * 60)
+    assert "인터뷰" in rag.read_doc_resource(sid, "interviews")
+    with pytest.raises(ValueError):
+        rag.read_doc_resource("없는세션", "metrics")

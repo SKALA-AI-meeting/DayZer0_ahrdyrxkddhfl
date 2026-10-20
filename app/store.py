@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS doc_requests (
     status TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+-- 지원자가 회사 문서를 연 기록(AI 활용 "결과 검증" 관찰용: 어시스턴트가 근거로 든 문서를 직접 열어 봤는가)
+CREATE TABLE IF NOT EXISTS doc_views (
+    session_id TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    minute REAL NOT NULL
+);
 -- 장면은 세션당 한 번만 실행. PRIMARY KEY가 중복 실행을 막는다(F-23).
 CREATE TABLE IF NOT EXISTS scene_runs (
     session_id TEXT NOT NULL,
@@ -397,3 +403,17 @@ def generating_reports() -> list[str]:
     """아직 "생성 중"인 리포트의 세션 id (서버 재시작으로 중단된 것 포함)."""
     with connect() as conn:
         return [r["session_id"] for r in conn.execute("SELECT session_id FROM reports WHERE state = 'generating'")]
+
+
+def add_doc_view(session_id: str, doc_id: str, minute: float) -> None:
+    """지원자가 회사 문서를 연 시각을 남긴다."""
+    with connect() as conn:
+        conn.execute("INSERT INTO doc_views (session_id, doc_id, minute) VALUES (?, ?, ?)",
+                     (session_id, doc_id, minute))
+
+
+def doc_views(session_id: str) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute("SELECT doc_id, minute FROM doc_views WHERE session_id = ? ORDER BY minute",
+                            (session_id,))
+        return [dict(r) for r in rows]

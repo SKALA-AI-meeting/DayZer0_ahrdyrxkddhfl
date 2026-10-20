@@ -8,6 +8,8 @@ import sys
 from contextlib import asynccontextmanager
 
 from langchain_core.tools import StructuredTool
+from mcp.shared.exceptions import McpError
+from pydantic import AnyUrl
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 
@@ -110,6 +112,27 @@ async def call_rag(tool_name: str, args: dict) -> str:
     async with _client().session("rag") as session:
         tools = {t.name: t for t in await load_mcp_tools(session)}
         return check_result(await tools[tool_name].ainvoke(args))
+
+
+async def read_doc_resource(session_id: str, doc_id: str) -> str:
+    """rag-mcp Resource(docs://{session_id}/{doc_id})로 회사 문서 원문을 읽는다(근거 패널용).
+
+    Raises:
+        PermissionError: 아직 공유되지 않은 문서.
+        LookupError: 없는 세션·문서.
+    """
+    # 연결 블록 안에서 예외를 올리면 ExceptionGroup으로 감싸지므로, 오류를 담아 두고 블록 밖에서 올린다
+    error: McpError | None = None
+    async with _client().session("rag") as session:
+        try:
+            res = await session.read_resource(AnyUrl(f"docs://{session_id}/{doc_id}"))
+        except McpError as exc:
+            error = exc
+    if error is not None:
+        if "아직 공유되지" in str(error):
+            raise PermissionError(str(error)) from error
+        raise LookupError(str(error)) from error
+    return "".join(getattr(c, "text", "") for c in res.contents)
 
 
 async def call_business(tool_name: str, args: dict) -> str:

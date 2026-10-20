@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from app import auth, clock, doc_graph, engine, progress, report, settings, store
 from app import docs as docs_module
+from app import mcp_client
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -252,16 +253,20 @@ def set_task(token: str, part: str, body: TaskIn) -> dict:
 
 
 @app.get("/api/invite/{token}/docs/{doc_id}")
-def read_doc(token: str, doc_id: str) -> dict:
-    """회사 문서 열람(F-15): 공개 시각 전 문서는 열 수 없다."""
+async def read_doc(token: str, doc_id: str) -> dict:
+    """회사 문서 열람(F-15): rag-mcp Resource로 원문을 읽는다. 공개 시각 판단은 MCP 서버가 한다."""
     s = _candidate(token, need_active=False)
-    minute = clock.minute_of(s["sim_seconds"])
     doc = {d["id"]: d for d in docs_module.all_docs(s["company"])}.get(doc_id)
     if doc is None:
         raise HTTPException(404, "없는 문서입니다.")
-    if doc["available_from_minute"] > minute:
-        raise HTTPException(403, f"'{doc['title']}' 문서는 아직 공유되지 않았습니다.")
-    return {"id": doc_id, "title": doc["title"], "body": docs_module.body(s["company"], doc_id)}
+    try:
+        body = await mcp_client.read_doc_resource(s["id"], doc_id)
+    except PermissionError as exc:
+        raise HTTPException(403, f"'{doc['title']}' 문서는 아직 공유되지 않았습니다.") from exc
+    except LookupError as exc:
+        raise HTTPException(404, "없는 문서입니다.") from exc
+    store.add_doc_view(s["id"], doc_id, clock.minute_of(s["sim_seconds"]))   # AI 결과 검증 관찰용 열람 기록
+    return {"id": doc_id, "title": doc["title"], "body": body}
 
 
 @app.post("/api/invite/{token}/submit")

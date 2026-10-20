@@ -2,7 +2,8 @@
 
 - 조회 도구: list_company_docs, search_company_docs, read_company_doc
 - 변경 도구: register_company_doc (destructiveHint, 사람 승인 토큰 필수, F-06)
-- Resource: scenario://brief (과제 브리프, 항상 공개)
+- Resource: docs://{session_id}/{doc_id} (회사 문서 원문, 근거 패널용 — 교안 29·33쪽),
+            scenario://brief (과제 브리프, 항상 공개)
 - 문서 공개 시각(F-15)을 서버가 직접 검사한다. session_minute·company는 모델이 아니라
   에이전트 코드가 채워 넣는다(app/mcp_client.py) → 모델이 값을 바꿔 미리 읽을 수 없다.
 
@@ -14,7 +15,7 @@ import re
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from app import approval, docs, settings, store
+from app import approval, clock, docs, settings, store
 
 mcp = FastMCP("dayzero-rag")
 READ = ToolAnnotations(readOnlyHint=True)
@@ -95,6 +96,25 @@ def register_company_doc(request_id: str, company: str, doc_id: str, title: str,
         raise ValueError("doc_id는 영문 소문자·숫자·-·_ 2~40자여야 합니다.")
     store.upsert_company_doc(company, doc_id, title, body)
     return {"ok": True, "doc_id": doc_id, "title": title}
+
+
+@mcp.resource("docs://{session_id}/{doc_id}")
+def read_doc_resource(session_id: str, doc_id: str) -> str:
+    """회사 문서 원문 Resource. 세션의 기업·시각을 서버가 DB에서 직접 읽어 공개 전 문서는 막는다(F-15).
+
+    Resource에는 시각 인자가 없으므로, 호출하는 쪽이 시각을 속여 미리 읽을 수 없게 서버가 판단한다.
+    """
+    try:
+        s = store.get_session(session_id)
+    except KeyError as exc:
+        raise ValueError("없는 세션입니다.") from exc
+    minute, company = clock.minute_of(s["sim_seconds"]), s["company"]
+    known = {d["id"]: d for d in docs.all_docs(company)}
+    if doc_id not in known:
+        raise ValueError(f"없는 문서입니다: {doc_id}")
+    if known[doc_id]["available_from_minute"] > minute:
+        raise PermissionError(f"'{known[doc_id]['title']}' 문서는 아직 공유되지 않았습니다.")
+    return docs.body(company, doc_id)
 
 
 @mcp.resource("scenario://brief")
