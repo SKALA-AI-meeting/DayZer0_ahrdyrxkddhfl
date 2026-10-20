@@ -136,6 +136,8 @@ def candidates(admin: dict = Depends(_admin)) -> list[dict]:
     rows = store.list_sessions(admin["company"])
     for r in rows:
         r["invite_path"] = f"/invite/{store.get_session(r['id'])['invite_token']}"
+        if r["status"] == "failed":   # 실패 원인과 trace 찾는 방법(Harness 표 6-2)
+            r["error"] = (store.get_report(r["id"]) or {}).get("error") or ""
     return rows
 
 

@@ -7,7 +7,7 @@ import DocAdmin from "@/components/DocAdmin";
 import Nav from "@/components/Nav";
 import { adminToken, api, ApiError, STATUS_LABEL } from "@/lib/api";
 
-type Candidate = { id: string; alias: string; email: string; status: string; invite_path: string; scenario: string };
+type Candidate = { id: string; alias: string; email: string; status: string; invite_path: string; scenario: string; error?: string };
 type Scenario = { id: string; company: string; service: string; task_title: string };
 
 function CopyButton({ text }: { text: string }) {
@@ -119,7 +119,10 @@ export default function AdminHome() {
                   <td><b>{r.alias}</b></td>
                   <td className="muted">{r.email || "-"}</td>
                   <td className="muted small">{scenarios.find((s) => s.id === r.scenario)?.company ?? r.scenario}</td>
-                  <td><span className={`badge ${r.status}`}>{STATUS_LABEL[r.status] ?? r.status}</span></td>
+                  <td>
+                    <span className={`badge ${r.status}`}>{STATUS_LABEL[r.status] ?? r.status}</span>
+                    {r.status === "failed" && r.error && <div className="muted small" style={{ marginTop: 4, maxWidth: 360 }}>{r.error}</div>}
+                  </td>
                   <td style={{ textAlign: "right" }}>
                     {r.status === "report_ready" ? <Link className="btn" href={`/admin/report/${r.id}`}>리포트 보기</Link>
                       : r.status === "failed" ? <button className="secondary" onClick={() => retry(r.id)}>리포트 다시 만들기</button>

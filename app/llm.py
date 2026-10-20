@@ -7,6 +7,7 @@
 """
 import asyncio
 import json
+import os
 import time
 
 import openai
@@ -29,6 +30,14 @@ def chat_model(temperature: float) -> ChatOpenAI:
     """재시도는 우리가 직접 하므로 클라이언트 자체 재시도는 끈다."""
     return ChatOpenAI(model=config()["llm"]["model"], temperature=temperature, max_retries=0,
                       timeout=config()["agent_loop"]["task_timeout_seconds"])
+
+
+def trace_hint(session_id: str) -> str:
+    """실패한 작업에서 trace를 찾는 방법(Harness: FAILED 작업은 trace 위치를 이력에 남긴다)."""
+    project = os.environ.get("LANGSMITH_PROJECT", "")
+    langsmith = (f"LangSmith 프로젝트 {project}에서 metadata session_id={session_id}"
+                 if os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and project else "LangSmith 꺼짐")
+    return f"trace: {langsmith} / 로컬 {trace_path().name} session={session_id}"
 
 
 def trace(record: dict) -> None:
@@ -56,7 +65,9 @@ async def ainvoke(runnable, payload, node: str, session_id: str = ""):
     for attempt in range(1, attempts + 1):
         started = time.perf_counter()
         try:
-            result = await runnable.ainvoke(payload)
+            # LangSmith에서 세션·노드로 모든 호출을 걸러 볼 수 있게 메타데이터를 붙인다
+            result = await runnable.ainvoke(payload, config={
+                "run_name": node, "tags": [node], "metadata": {"session_id": session_id, "node": node}})
         except RETRYABLE as exc:
             trace({"ts": time.time(), "session": session_id, "node": node, "attempt": attempt,
                     "error": type(exc).__name__})

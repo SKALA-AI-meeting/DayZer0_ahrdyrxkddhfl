@@ -213,7 +213,8 @@ async def _run(session_id: str) -> str:
             body = await generate(session_id)
         except Exception as exc:   # 실패 원인을 남기고 재시도(F-34)
             log.exception("리포트 생성 실패 %s/%s: session=%s", attempt, attempts, session_id)
-            store.update_report(session_id, attempts=attempt, error=f"{type(exc).__name__}: {exc}")
+            store.update_report(session_id, attempts=attempt,
+                                error=f"{type(exc).__name__}: {exc} | {llm.trace_hint(session_id)}")
             continue
         store.update_report(session_id, state="ready", attempts=attempt, body=body, error=None)
         store.update_session(session_id, status="report_ready")

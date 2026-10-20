@@ -197,3 +197,26 @@ def test_candidate_can_start_split_before_scene(monkeypatch):
     other = store.create_session("y")
     asyncio.run(engine.send_message(other, "dm", "안녕하세요 잘 부탁드려요", now=1000.0))
     assert "negotiate" not in store.run_scene_ids(other)  # 분담 이야기가 아니면 그대로
+
+
+# Harness 표 6-2: LLM 호출에 세션 메타데이터를 붙이고, 리포트가 실패하면 trace 찾는 방법을 이력에 남긴다
+def test_llm_calls_carry_session_metadata_and_failed_report_keeps_trace_hint(monkeypatch):
+    from app import llm, report
+    seen = {}
+
+    class FakeModel:
+        async def ainvoke(self, payload, config=None):
+            seen.update(config or {})
+            return type("R", (), {"content": "ok", "usage_metadata": {}})()
+    asyncio.run(llm.ainvoke(FakeModel(), [], "persona.lead", "sid-1"))
+    assert seen["metadata"] == {"session_id": "sid-1", "node": "persona.lead"} and seen["run_name"] == "persona.lead"
+
+    sid = store.create_session("x")
+    store.update_session(sid, status="completed")
+
+    async def broken(_sid):
+        raise RuntimeError("판별 실패")
+    monkeypatch.setattr(report, "generate", broken)
+    assert asyncio.run(report.generate_with_retry(sid)) == "failed"
+    err = store.get_report(sid)["error"]
+    assert "RuntimeError: 판별 실패" in err and f"session={sid}" in err and "trace:" in err

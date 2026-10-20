@@ -157,7 +157,7 @@ START → prepare(형식 검사·개인정보 마스킹) → approval: interrupt
 | Agent Loop | 응답당 도구 3회, 같은 도구 3회, 재생성 2회, 120초, recursion limit | `config.toml [agent_loop] [verify]` |
 | Guardrails | 판정 발언 차단(입력·출력), 변경 도구 사람 승인, 개인정보 마스킹(문서 등록), 실명 대신 별칭 | `app/guard.py`, `app/approval.py`, `app/doc_graph.py` |
 | Recovery | 429·5xx·타임아웃 2회 재시도 → 장면은 정해진 대체 대사, 답장은 정해진 문장, 리포트는 2회 재시도 후 실패·재시작 시 재생성 | `app/llm.py`, `app/graph.py`, `app/report.py` |
-| Observability | 모든 LLM 호출·검증 결과·진행 이벤트를 `data/trace.jsonl`에, LangSmith 키가 있으면 LangSmith로도 | `app/llm.py` |
+| Observability | 모든 LLM 호출·검증 결과·진행 이벤트를 `data/trace.jsonl`에, LangSmith 키가 있으면 LangSmith로도(호출마다 metadata `session_id`·`node`). 리포트가 FAILED면 오류와 함께 trace 찾는 방법을 작업 이력에 저장하고 관리자 목록에 표시 | `app/llm.py` |
 
 ---
 
