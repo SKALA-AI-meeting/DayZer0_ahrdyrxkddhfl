@@ -24,6 +24,14 @@ def test_saying_unreleased_doc_is_unavailable_is_not_citation_error():
         == "citation:사용자 인터뷰 요약"
 
 
+def test_promise_without_tool_call_is_deferral():
+    # "읽어보고 피드백 드릴게요"라고만 하고 이번 답에서 도구를 한 번도 안 부르면 실패
+    text = "네, 공유 문서에서 내용을 읽어보고 피드백 드릴게요. 잠시만 기다려 주세요."
+    assert sg.check(text, [], [], True, tools_used=0) == "deferral"
+    assert sg.check(text, [], [], True, tools_used=1) == "ok"
+    assert sg.check(text, [], [], False, tools_used=0) == "ok"     # 도구가 없는 장면 대사는 대상 아님
+
+
 def test_every_scene_fallback_passes_its_own_check():
     # 대체 문장 자체가 검증을 통과해야 한다(F-23 정해진 내용 보장)
     for s in scenes():

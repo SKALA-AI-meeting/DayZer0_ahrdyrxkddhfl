@@ -189,6 +189,7 @@ async def poll(token: str, after: int = 0) -> dict:
                  for d in docs_module.available(s["company"], state["minute"])],
         "part_titles": settings.PART_TITLES,
         "poll_interval_seconds": settings.config()["session"]["poll_interval_seconds"],
+        "time_scale": settings.config()["session"]["time_scale"],
     }
 
 

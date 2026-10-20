@@ -10,7 +10,7 @@ type Poll = {
   minute: number; remaining: number; status: string; time: string; phase: string;
   messages: Msg[]; tasks: Task[]; my_parts: Record<string, string>;
   coworker_parts: Record<string, string>; docs: { id: string; title: string }[];
-  part_titles: Record<string, string>; poll_interval_seconds: number;
+  part_titles: Record<string, string>; poll_interval_seconds: number; time_scale: number;
 };
 
 const SAVE_DELAY_MS = 1000; // 입력이 멈춘 뒤 자동 저장까지 기다리는 시간(UI 반응성용)
@@ -32,6 +32,8 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
   const [doc, setDoc] = useState<{ title: string; body: string } | null>(null);
   const [error, setError] = useState("");
   const lastId = useRef(0);
+  const synced = useRef<{ remaining: number; at: number; scale: number } | null>(null);
+  const [shown, setShown] = useState<number | null>(null);   // 화면에 보이는 남은 시간(분)
   const loadedParts = useRef(false);
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -48,6 +50,8 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
       }
       if (!loadedParts.current) { setParts(p.my_parts); loadedParts.current = true; }  // 이어하기 시 복원
       setState(p);
+      synced.current = { remaining: p.remaining, at: Date.now(), scale: p.time_scale };
+      setShown(p.remaining);
       if (p.status !== "in_progress") onEnd();
     } catch (e) {
       setError((e as Error).message);
@@ -60,6 +64,16 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
     const t = setInterval(poll, ms);
     return () => clearInterval(t);
   }, [poll, state?.poll_interval_seconds]);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      const s = synced.current;
+      if (!s) return;
+      const elapsedMin = ((Date.now() - s.at) / 60000) * s.scale;
+      setShown(Math.max(0, s.remaining - elapsedMin));
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
 
   async function send() {
     if (!draft.trim()) return;
@@ -128,7 +142,7 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
       <div className="topbar">
         <span className="row"><span className="logo">Day <span>Zer0</span></span>
           <span className="muted">루프랩 · 모아런 신규 기능 기획</span></span>
-        <span className="row">남은 시간 <span className={`timer ${state.remaining < 10 ? "low" : ""}`}>{mmss(state.remaining)}</span></span>
+        <span className="row">남은 시간 <span className={`timer ${(shown ?? state.remaining) < 10 ? "low" : ""}`}>{mmss(shown ?? state.remaining)}</span></span>
         <button onClick={submit}>기획안 제출</button>
       </div>
 
@@ -159,7 +173,7 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
       {/* 공유 문서: 기획안 5파트 */}
       <section className="col">
         <div><h2 style={{ marginBottom: 2 }}>공유 문서 · 기획안</h2>
-          <span className="muted small">입력하면 자동 저장됩니다. 동료가 공유한 내용은 파란 상자로 보여요.</span></div>
+          <span className="muted small">입력하면 자동 저장됩니다. 편집은 나만 할 수 있고, 이도현·팀장은 읽을 수 있어요. 동료가 공유한 내용은 파란 상자로 보여요.</span></div>
         {Object.entries(state.part_titles).map(([part, title]) => {
           const owner = state.tasks.find((t) => t.part === part)?.owner ?? "candidate";
           return (
@@ -198,8 +212,9 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
           {doc && <div className="doc-body"><div className="row" style={{ justifyContent: "space-between" }}><b>{doc.title}</b>
             <button className="ghost" onClick={() => setDoc(null)}>닫기</button></div>{doc.body}</div>}
         </div>
-        <div className="panel" style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, minHeight: 280 }}>
-          <h2>AI 어시스턴트 <span className="muted small">업무용 도구 · 회사 문서를 참고해 답해요</span></h2>
+        <div className="panel assistant-panel">
+          <div><h2 style={{ marginBottom: 0 }}>AI 어시스턴트</h2>
+            <span className="muted small">업무용 도구 · 회사 문서를 참고해 답해요</span></div>
           <div className="chat">
             {assistantLog.length === 0 && <div className="typing">질문, 요약, 초안 작성을 요청해 보세요.</div>}
             {assistantLog.map((m) => <Bubble key={m.id} m={m} />)}

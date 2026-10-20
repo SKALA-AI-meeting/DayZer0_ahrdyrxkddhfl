@@ -61,5 +61,6 @@ async def speak(role: str, session_id: str, minute: float, task: str,
     result = await speak_graph.speak(
         session_id=session_id, node=f"persona.{role}", system=system, human=human, minute=minute,
         use_tools=use_tools, must_include=must_include, company=session["company"],
+        plan_access=use_tools,   # 동료·팀장은 공유 문서를 읽을 수 있다(편집은 지원자만)
         fallback=fallback or config()["verify"]["fallback_reply"])
     return result["text"]

@@ -42,3 +42,12 @@ def test_assign_tasks_validates_and_updates():
         business.assign_tasks(sid, {"9": "candidate"})
     with pytest.raises(KeyError):
         business.list_tasks("없는세션")
+
+
+def test_read_shared_plan_returns_candidate_and_coworker_text():
+    sid = store.create_session("지원자")
+    store.upsert_part(sid, "1", "문제: 재참여율 22%", 20)
+    store.upsert_part(sid, "coworker:4", "사례 A, B", 90)
+    parts = {p["part"]: p for p in business.read_shared_plan(sid)["parts"]}
+    assert parts["1"]["candidate_text"] == "문제: 재참여율 22%" and parts["1"]["owner"] == "candidate"
+    assert parts["4"]["coworker_text"] == "사례 A, B"

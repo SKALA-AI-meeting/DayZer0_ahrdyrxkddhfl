@@ -8,6 +8,7 @@ AI가 만든 문장을 그대로 내보내지 않고, 코드가 검증한 뒤 �
                                       └─ 실패 + 한도 초과 → fallback → END     (안전한 대체 문장)
 
 verify가 검사하는 것 (모두 코드, LLM 아님):
+- 말만 하고 실행 안 함: "확인해 볼게요"라고 하면서 이번 답에서 도구를 한 번도 부르지 않음
 - 판정 발언(F-24): 합격·평가 결과·연출 같은 금지 표현
 - 필수 내용(F-23): 장면 대사에 전달해야 할 사실(events.toml must_include)이 빠졌는지
 - 출처(F-22): 답에 밝힌 회사 문서가 실제로 이번에 도구로 읽은 문서인지
@@ -28,6 +29,7 @@ class SpeakState(TypedDict, total=False):
     node: str                     # 기록용 이름 (예: "persona.coworker")
     minute: float                 # 세션 시각. 문서 공개 시각 판단에 쓴다(코드가 넣음)
     company: str                  # 기업. 기업이 등록한 문서(F-06)까지 검색한다(코드가 넣음)
+    plan_session: str             # 공유 문서 읽기를 허용할 세션 id(동료·팀장만, 없으면 "")
     use_tools: bool
     temperature: float
     messages: list[BaseMessage]   # 시스템·대화·도구 결과
@@ -58,7 +60,7 @@ async def llm_node(state: SpeakState) -> SpeakState:
     limits = config()["agent_loop"]
     can_use_tools = state["use_tools"] and state["tool_calls"] < limits["max_tool_calls_per_reply"]
     if can_use_tools:
-        model = model.bind_tools(doc_tool_specs())   # 설명만 넘기고, 실행은 tools 노드에서
+        model = model.bind_tools(doc_tool_specs(bool(state["plan_session"])))   # 설명만 넘기고, 실행은 tools 노드에서
     ai = await llm.ainvoke(model, state["messages"], state["node"], state["session_id"])
     return {"messages": state["messages"] + [ai], "text": str(ai.content)}
 
@@ -75,7 +77,7 @@ async def tools_node(state: SpeakState) -> SpeakState:
     calls, streak, last = state["tool_calls"], state["streak"], state["last_tool"]
     titles = list(state["read_titles"])
     out: list[BaseMessage] = []
-    async with doc_tools(state["minute"], state["company"]) as tools:
+    async with doc_tools(state["minute"], state["company"], state["plan_session"]) as tools:
         by_name = {t.name: t for t in tools}
         for tc in state["messages"][-1].tool_calls:
             calls += 1
@@ -99,7 +101,7 @@ async def tools_node(state: SpeakState) -> SpeakState:
 
 
 def check(text: str, must_include: list[list[str]], read_titles: list[str], use_tools: bool,
-          minute: float = float("inf"), company: str = "") -> str:
+          minute: float = float("inf"), company: str = "", tools_used: int = 1) -> str:
     """AI 문장을 코드로 검증한다. 통과하면 "ok", 아니면 실패 이유.
 
     출처 검사는 지금 공개된 문서만 대상으로 한다. 공개 전 문서는 내용을 알 수 없으므로
@@ -110,6 +112,8 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
     for options in must_include:
         if not any(o in text for o in options):
             return f"missing:{options[0]}"
+    if use_tools and tools_used == 0 and any(p in text for p in config()["verify"]["deferral_phrases"]):
+        return "deferral"   # 확인하겠다고 말만 하고 이번 답에서 도구를 부르지 않음
     if use_tools:
         for d in docs.available(company, minute):
             if d["title"] in text and d["title"] not in read_titles:
@@ -119,7 +123,7 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
 
 def verify_node(state: SpeakState) -> SpeakState:
     verdict = check(state["text"], state["must_include"], state["read_titles"], state["use_tools"],
-                    state["minute"], state["company"])
+                    state["minute"], state["company"], state["tool_calls"])
     llm.trace({"session": state["session_id"], "node": f"{state['node']}.verify",
                "verdict": verdict, "regenerations": state["regenerations"]})
     return {"verdict": verdict, "verdicts": state["verdicts"] + [verdict]}
@@ -136,6 +140,7 @@ def after_verify(state: SpeakState) -> str:
 FEEDBACK = {
     "judgement": "방금 답에 평가·합격·연출에 관한 표현이 있었다. 그런 표현 없이 업무 이야기만 다시 써라.",
     "missing": "방금 답에 반드시 전달해야 할 내용 '{x}'이(가) 빠졌다. 빠짐없이 넣어 다시 써라.",
+    "deferral": "확인하겠다고만 하고 실제로 확인하지 않았다. 지금 도구를 호출해 확인한 뒤, 확인한 내용으로 바로 답하라.",
     "citation": "방금 답에서 '{x}' 문서를 근거로 들었지만 이번에 그 문서를 읽지 않았다. "
                 "도구로 확인하거나, 확인하지 않은 문서는 언급하지 말고 다시 써라.",
 }
@@ -183,7 +188,7 @@ SPEAK = build()
 
 async def speak(*, session_id: str, node: str, system: str, human: str, minute: float,
                 use_tools: bool, fallback: str, must_include: list[list[str]] | None = None,
-                company: str = "") -> dict:
+                company: str = "", plan_access: bool = False) -> dict:
     """발화 Graph를 실행하고 {text, verdicts, read_titles}를 반환한다.
 
     Raises:
@@ -195,6 +200,7 @@ async def speak(*, session_id: str, node: str, system: str, human: str, minute: 
     recursion = (limits["max_tool_calls_per_reply"] * 2 + 3) * (cfg["verify"]["max_regenerations"] + 1) + 5
     state = await asyncio.wait_for(SPEAK.ainvoke({
         "session_id": session_id, "node": node, "minute": minute, "company": company,
+        "plan_session": session_id if plan_access else "",
         "use_tools": use_tools,
         "temperature": cfg["llm"]["persona_temperature"],
         "messages": [SystemMessage(system), HumanMessage(human)],
