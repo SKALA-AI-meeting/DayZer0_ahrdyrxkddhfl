@@ -181,8 +181,12 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
               <h3>{part}. {title} <span className={`owner ${owner}`}>{NAME[owner]}</span></h3>
               <textarea rows={4} value={parts[part] ?? ""} onChange={(e) => editPart(part, e.target.value)}
                 placeholder="여기에 작성하세요." />
-              {state.coworker_parts[part] && (
+              {state.coworker_parts[part] ? (
                 <div className="shared"><b>이도현 공유</b>{"\n"}{state.coworker_parts[part]}</div>
+              ) : owner !== "candidate" && (
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  이도현 담당 · 작업 중이에요. 완성되면 여기에 공유돼요.
+                </div>
               )}
             </div>
           );

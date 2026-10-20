@@ -30,6 +30,31 @@ def test_unfinished_split_is_fixed_before_first_event(monkeypatch):
     assert len(msgs) == 2                                   # 그다음 30분 이벤트 그대로
 
 
+def test_coworker_cards_doing_after_split_and_done_after_share(monkeypatch):
+    calls = []
+
+    async def fake_speak(*_a, **_k):
+        return "msg"
+
+    async def fake_business(tool, args):
+        calls.append((tool, args))
+        if tool == "assign_tasks":
+            store.set_task_owners(args["session_id"], args["assignment"])
+        if tool == "update_task_status":
+            store.set_task_status(args["session_id"], args["part"], args["status"])
+        return "ok"
+    monkeypatch.setattr(persona, "speak", fake_speak)
+    monkeypatch.setattr(graph, "call_business", fake_business)
+    sid = store.create_session("x")
+    store.update_session(sid, phase="negotiate")
+    asyncio.run(graph.run_turn(sid, 30, {"kind": "scene", "scene_id": "coop_help"}))   # 분업 확정
+    status = {t["part"]: t["status"] for t in store.list_tasks(sid)}
+    assert status["4"] == "doing" and status["5"] == "doing" and status["1"] == "todo"
+    asyncio.run(graph.run_turn(sid, 90, {"kind": "scene", "scene_id": "respect_review"}))  # 01:30 공유
+    status = {t["part"]: t["status"] for t in store.list_tasks(sid)}
+    assert status["4"] == "done" and status["5"] == "done"
+
+
 def test_no_finalize_when_split_already_done(monkeypatch):
     _fake(monkeypatch)
     sid = store.create_session("x")

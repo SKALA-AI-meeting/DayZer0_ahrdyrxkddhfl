@@ -50,6 +50,14 @@ class Agreement(BaseModel):
                                        description="지원자가 바꾸자고 한 파트만. 없으면 빈 목록")
 
 
+async def _mark_coworker_cards(session_id: str, assignment: dict[str, str], status: str) -> None:
+    """동료가 맡은 카드 상태를 business-mcp 변경 도구로 바꾼다(동료가 일하는 게 보드에 보이게)."""
+    for part, owner in sorted(assignment.items()):
+        if owner == "coworker":
+            await call_business("update_task_status",
+                                {"session_id": session_id, "part": part, "status": status})
+
+
 def _post(state: TurnState, channel: str, sender: str, text: str) -> None:
     store.add_message(state["session_id"], channel, sender, text, state["minute"])
 
@@ -84,6 +92,7 @@ async def run_scene(state: TurnState) -> TurnState:
                                fallback=scene.get("fallback"))
     if shared:
         text += "\n\n" + "\n\n".join(shared)
+        await _mark_coworker_cards(sid, state["assignment"], "done")
     _post(state, scene["channel"], scene["speaker"], text)
     if update:
         store.update_session(sid, **update)
@@ -129,6 +138,7 @@ async def apply_assignment(state: TurnState) -> TurnState:
     assignment = {**state["assignment"], **state.get("requested", {})}
     rounds = state["negotiation_round"] + (0 if state["agreed"] else 1)
     await call_business("assign_tasks", {"session_id": state["session_id"], "assignment": assignment})
+    await _mark_coworker_cards(state["session_id"], assignment, "doing")
     store.update_session(state["session_id"], assignment=assignment, negotiation_round=rounds,
                          phase="work")
     note = "" if state["agreed"] else " (조정 횟수 한도에 닿아 마지막 안으로 진행한다고 부드럽게 알려라)"
@@ -158,6 +168,7 @@ async def finalize_split(state: TurnState) -> TurnState:
     """
     assignment = state["assignment"]
     await call_business("assign_tasks", {"session_id": state["session_id"], "assignment": assignment})
+    await _mark_coworker_cards(state["session_id"], assignment, "doing")
     store.update_session(state["session_id"], phase="work")
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
