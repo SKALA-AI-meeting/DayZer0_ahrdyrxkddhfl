@@ -11,6 +11,7 @@
 
 분업 조정은 최대 config [negotiation].max_rounds회(F-21). 이벤트 실행 시점은 engine이 시계로 정한다.
 """
+import logging
 from typing import Literal, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -22,6 +23,7 @@ from app import llm, persona, store
 from app.mcp_client import call_business
 from app.settings import PART_TITLES, config, coworker_parts, scene_by_id
 
+log = logging.getLogger("dayzero.graph")
 ALL_CHANNELS = ("team", "dm", "system")
 
 
@@ -87,9 +89,14 @@ async def run_scene(state: TurnState) -> TurnState:
                 "리뷰해 달라고 한두 문장으로 짧게 부탁하라. '내가 맡은 파트'라고 단정하지 마라. "
                 "지원자를 '도현님'이라고 부르지 마라. 내용을 요약하거나 특정 항목을 언급하지 마라.")
     # 장면 대사는 필수 내용(must_include)이 들어갔는지 코드가 검증하고, 끝내 빠지면 원문 대사를 쓴다(F-23).
-    text = await persona.speak(scene["speaker"], sid, state["minute"], task, ALL_CHANNELS,
-                               use_tools=False, must_include=scene.get("must_include"),
-                               fallback=scene.get("fallback"))
+    try:
+        text = await persona.speak(scene["speaker"], sid, state["minute"], task, ALL_CHANNELS,
+                                   use_tools=False, must_include=scene.get("must_include"),
+                                   fallback=scene.get("fallback"))
+    except Exception:   # LLM이 끝내 실패해도 세션이 멈추지 않게 정해진 대사로 진행한다(F-23, PRD A.4)
+        log.exception("장면 대사 생성 실패, 대체 대사 사용: session=%s scene=%s", sid, scene["id"])
+        llm.trace({"session": sid, "node": "graph.run_scene", "fallback": scene["id"]})
+        text = scene["fallback"]
     if shared:
         text += "\n\n" + "\n\n".join(shared)
         await _mark_coworker_cards(sid, state["assignment"], "done")

@@ -58,6 +58,8 @@ async def speak(role: str, session_id: str, minute: float, task: str,
         must_include: 장면 대사에 꼭 들어가야 할 사실(F-23 검증용).
         fallback: 검증을 끝내 통과하지 못했을 때 쓸 문장. 없으면 config의 기본 대체 문장.
     """
+    if role == "lead":   # 팀장은 지원자와 동료의 1:1 대화를 볼 수 없다(팀 채널·알림만)
+        channels = tuple(c for c in channels if c != "dm")
     session = store.get_session(session_id)
     system = (f"{prompt(role)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
               f"- 현재 분담: {assignment_text(session['assignment'])}\n"

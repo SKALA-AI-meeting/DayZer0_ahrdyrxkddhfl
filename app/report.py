@@ -69,6 +69,21 @@ async def generate_with_retry(session_id: str) -> str:
     """
     if not store.claim_report(session_id):
         return "skipped"
+    return await _run(session_id)
+
+
+async def resume_stale() -> list[str]:
+    """서버가 재시작되기 전 "생성 중"이던 리포트를 다시 만든다(F-34). 서버 시작 때 부른다."""
+    done = []
+    for sid in store.generating_reports():
+        log.warning("중단된 리포트 다시 생성: session=%s", sid)
+        await _run(sid)
+        done.append(sid)
+    return done
+
+
+async def _run(session_id: str) -> str:
+    """리포트 생성 본체: 재시도 후 실패하면 failed."""
     attempts = config()["report"]["retry_count"] + 1
     for attempt in range(1, attempts + 1):
         try:

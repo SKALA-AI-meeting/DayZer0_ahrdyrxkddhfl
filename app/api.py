@@ -6,13 +6,24 @@
 
 실행: uv run uvicorn app.api:app --port 8000
 """
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from app import auth, clock, doc_graph, engine, settings, store
+from app import auth, clock, doc_graph, engine, report, settings, store
 from app import docs as docs_module
 
-app = FastAPI(title="Day Zero MVP")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # 재시작 전 "생성 중"이던 리포트를 백그라운드로 다시 만든다(F-34)
+    task = asyncio.create_task(report.resume_stale())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Day Zero MVP", lifespan=lifespan)
 
 
 # ---------- 공통 ----------

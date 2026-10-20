@@ -391,3 +391,9 @@ def get_doc_request(request_id: str) -> dict | None:
     with connect() as conn:
         row = conn.execute("SELECT * FROM doc_requests WHERE request_id = ?", (request_id,)).fetchone()
     return dict(row) if row else None
+
+
+def generating_reports() -> list[str]:
+    """아직 "생성 중"인 리포트의 세션 id (서버 재시작으로 중단된 것 포함)."""
+    with connect() as conn:
+        return [r["session_id"] for r in conn.execute("SELECT session_id FROM reports WHERE state = 'generating'")]

@@ -59,7 +59,13 @@ async def send_message(session_id: str, channel: str, text: str, now: float | No
         role = "coworker" if channel == "dm" else "lead"
         store.add_message(session_id, channel, role, guard.notice(), minute)
         return
-    await graph.run_turn(session_id, minute, {"kind": "candidate", "channel": channel, "text": text})
+    try:
+        await graph.run_turn(session_id, minute, {"kind": "candidate", "channel": channel, "text": text})
+    except Exception:   # 재시도 후에도 실패: 500 대신 정해진 문장으로 답하고 원인은 로그에 남긴다(PRD A.4)
+        log.exception("답장 생성 실패: session=%s channel=%s", session_id, channel)
+        role = "coworker" if channel == "dm" else "lead"
+        store.add_message(session_id, channel, role,
+                          settings.config()["verify"]["llm_failure_reply"], minute)
 
 
 async def ask_assistant(session_id: str, text: str, now: float | None = None) -> str:
