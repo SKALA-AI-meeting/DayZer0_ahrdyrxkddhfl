@@ -20,7 +20,19 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen REAL,
     negotiation_round INTEGER NOT NULL DEFAULT 0,
     assignment TEXT NOT NULL,          -- JSON: 파트 번호 → candidate | coworker | both
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    company TEXT NOT NULL DEFAULT '',  -- 초대한 기업. 다른 기업은 볼 수 없다(F-01)
+    email TEXT NOT NULL DEFAULT '',
+    invite_token TEXT UNIQUE,          -- 초대 링크 토큰(F-02). 지원자 인증 수단
+    invite_expires_at REAL,
+    consented INTEGER NOT NULL DEFAULT 0
+);
+-- 기업 관리자 계정(F-01). 비밀번호는 salt + PBKDF2 해시로만 저장한다.
+CREATE TABLE IF NOT EXISTS admins (
+    email TEXT PRIMARY KEY,
+    company TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    pw_hash TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,15 +98,21 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
-def create_session(alias: str) -> str:
-    """세션과 기본 태스크 보드를 만들고 세션 id를 반환한다."""
+def create_session(alias: str, *, company: str = "", email: str = "",
+                   status: str = "in_progress", invite_token: str | None = None,
+                   invite_expires_at: float | None = None) -> str:
+    """세션과 기본 태스크 보드를 만들고 세션 id를 반환한다.
+
+    초대(F-02)로 만들 때는 status="invited"와 초대 토큰·만료 시각을 넘긴다.
+    """
     session_id = uuid.uuid4().hex[:12]
     assignment = default_assignment()
     with connect() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, alias, status, phase, assignment, created_at)"
-            " VALUES (?, ?, 'in_progress', 'waiting', ?, ?)",
-            (session_id, alias, json.dumps(assignment), time.time()))
+            "INSERT INTO sessions (id, alias, status, phase, assignment, created_at, company, email,"
+            " invite_token, invite_expires_at) VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?)",
+            (session_id, alias, status, json.dumps(assignment), time.time(), company, email,
+             invite_token, invite_expires_at))
         conn.executemany(
             "INSERT INTO tasks (session_id, part, title, owner, status) VALUES (?, ?, ?, ?, 'todo')",
             [(session_id, part, PART_TITLES[part], owner) for part, owner in assignment.items()])
@@ -279,3 +297,34 @@ def get_report(session_id: str) -> dict | None:
     data = dict(row)
     data["body"] = json.loads(data["body"]) if data["body"] else None
     return data
+
+
+def session_by_invite(token: str) -> dict | None:
+    """초대 토큰으로 세션을 찾는다. 없으면 None."""
+    with connect() as conn:
+        row = conn.execute("SELECT id FROM sessions WHERE invite_token = ?", (token,)).fetchone()
+    return get_session(row["id"]) if row else None
+
+
+def list_sessions(company: str) -> list[dict]:
+    """기업의 지원자 세션 목록(F-03). 다른 기업 세션은 포함하지 않는다(F-01)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, alias, email, status, created_at FROM sessions WHERE company = ?"
+            " ORDER BY created_at DESC", (company,))
+        return [dict(r) for r in rows]
+
+
+def create_admin(email: str, company: str, salt: str, pw_hash: str) -> bool:
+    """관리자 계정을 만든다. 이미 있는 이메일이면 False."""
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO admins (email, company, salt, pw_hash) VALUES (?, ?, ?, ?)",
+            (email, company, salt, pw_hash))
+        return cur.rowcount == 1
+
+
+def get_admin(email: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM admins WHERE email = ?", (email,)).fetchone()
+    return dict(row) if row else None

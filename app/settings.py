@@ -8,8 +8,13 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parent.parent
 SECONDS_PER_MINUTE = 60
+# 모든 모듈이 이 파일을 먼저 불러오므로 여기서 .env를 읽는다.
+# override=True: 셸에 같은 이름의 변수(예: 다른 OPENAI_API_KEY)가 있어도 이 프로젝트 값을 쓴다.
+load_dotenv(ROOT / ".env", override=True)
 
 
 @lru_cache

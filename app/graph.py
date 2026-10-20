@@ -2,7 +2,8 @@
 
 한 번 실행 = 한 번의 입력(정해진 시각이 된 장면, 또는 지원자 메시지) 처리.
 
-    START ─┬─ 장면 ─────────────→ run_scene ─→ END
+    START ─┬─ 이벤트 장면 + 아직 분업 중 ─→ finalize_split ─→ run_scene ─→ END
+           ├─ 장면 ─────────────→ run_scene ─→ END
            ├─ 분업 중 + 동료 1:1 ─→ check_agreement ─┬─ 분업 얘기 아님 ─→ reply
            │                                        ├─ 합의 / 조정 한도 도달 ─→ apply_assignment ─→ END
            │                                        └─ 미합의 ─→ counter_proposal ─→ END (다음 메시지에서 다시 판단: 반복)
@@ -73,9 +74,10 @@ async def run_scene(state: TurnState) -> TurnState:
                 shared.append(f"[{key}번 {part['title']}]\n{part['body'].strip()}")
         # 공유 내용은 코드가 원문 그대로 붙인다(F-23 정해진 내용). LLM은 인사만 하고 특정 항목을 짚지 않는다.
         nums = ", ".join(s.split("번", 1)[0].strip("[") + "번" for s in shared)
-        task = (f"너(이도현)가 맡은 {nums} 파트를 공유 문서에 올렸으니, 지원자에게 리뷰해 달라고 "
-                "한두 문장으로 짧게 부탁하라. 지원자를 '도현님'이라고 부르지 마라. "
-                "내용을 요약하거나 특정 항목을 언급하지 마라.")
+        # 지원자가 3번을 혼자 맡았을 수도 있으므로 "내가 맡은"이라고 단정하지 않는다(사실과 다른 말 방지).
+        task = (f"기획안 {nums}에 넣을 너(이도현)의 작업 내용을 공유 문서에 올렸으니, 지원자에게 "
+                "리뷰해 달라고 한두 문장으로 짧게 부탁하라. '내가 맡은 파트'라고 단정하지 마라. "
+                "지원자를 '도현님'이라고 부르지 마라. 내용을 요약하거나 특정 항목을 언급하지 마라.")
     text = await persona.speak(scene["speaker"], sid, state["minute"], task, ALL_CHANNELS,
                                use_tools=False)
     if shared:
@@ -146,10 +148,29 @@ async def reply(state: TurnState) -> TurnState:
     return {}
 
 
+async def finalize_split(state: TurnState) -> TurnState:
+    """분업 조정이 끝나기 전에 첫 이벤트 시각이 오면, 지금 안으로 확정한다.
+
+    PRD가 정하지 않은 빈칸을 채운 처리다. F-21의 "마지막 안으로 진행"과 같은 방식이며,
+    이벤트가 나올 때 담당이 항상 정해져 있게 한다(가이드 7절).
+    """
+    assignment = state["assignment"]
+    await call_business("assign_tasks", {"session_id": state["session_id"], "assignment": assignment})
+    store.update_session(state["session_id"], phase="work")
+    text = await persona.speak(
+        "coworker", state["session_id"], state["minute"],
+        f"분담 얘기가 아직 안 끝났지만 시간이 됐으니 일단 지금 안으로 진행하자고 부드럽게 알리고, "
+        f"태스크 보드에 반영했다고 말하라: {persona.assignment_text(assignment)}",
+        ALL_CHANNELS, use_tools=False)
+    _post(state, "dm", "coworker", text)
+    return {"phase": "work"}
+
+
 def route_entry(state: TurnState) -> str:
     trigger = state["trigger"]
     if trigger["kind"] == "scene":
-        return "run_scene"
+        is_event = bool(scene_by_id(trigger["scene_id"])["element"])
+        return "finalize_split" if is_event and state["phase"] == "negotiate" else "run_scene"
     if state["phase"] == "negotiate" and trigger["channel"] == "dm":
         return "check_agreement"
     return "reply"
@@ -160,9 +181,11 @@ def build():
     g = StateGraph(TurnState)
     for name, fn in [("run_scene", run_scene), ("check_agreement", check_agreement),
                      ("counter_proposal", counter_proposal), ("apply_assignment", apply_assignment),
-                     ("reply", reply)]:
+                     ("reply", reply), ("finalize_split", finalize_split)]:
         g.add_node(name, fn)
-    g.add_conditional_edges(START, route_entry, ["run_scene", "check_agreement", "reply"])
+    g.add_conditional_edges(START, route_entry,
+                            ["run_scene", "finalize_split", "check_agreement", "reply"])
+    g.add_edge("finalize_split", "run_scene")   # 확정한 뒤 원래 이벤트를 그대로 실행
     g.add_conditional_edges("check_agreement", after_check,
                             ["reply", "apply_assignment", "counter_proposal"])
     for name in ("run_scene", "counter_proposal", "apply_assignment", "reply"):
