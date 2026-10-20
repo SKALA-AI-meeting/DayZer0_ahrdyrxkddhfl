@@ -101,3 +101,6 @@ def test_stale_deadline_is_rejected_after_kickoff():
     assert verdict == "stale_time:마감 01:50, 남은 시간 약 40분"
     assert sg.check("마감은 그대로예요", [], [], False, minute=70, scenario="pixel") == "ok"
     assert sg.check("2시간 뒤까지 제출해 주세요", [], [], False, minute=110).startswith("stale_time:마감 시각(01:50)이 됐다")
+
+    # 중간점검 미미함: 킥오프가 재시도로 0분 뒤에 실행돼도 필수 내용 "2시간"은 막지 않는다
+    assert sg.check("2시간 뒤 2~3쪽 기획안을 받겠습니다", [["2시간"], ["기획안"]], [], False, minute=0.3) == "ok"

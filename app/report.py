@@ -111,6 +111,11 @@ def check_summary(text: str, section: dict) -> str:
     for q in re.findall(r'["“]([^"”]+)["”]', text):
         if not any(observe.quote_found(q, o["quote"], threshold) for o in section["observed"]):
             return f"unquoted:{q}"
+    # 작은따옴표 안 문장도 원문(또는 문서 제목이 든 행동 문장)에 있어야 한다. 따옴표 종류로 검증을 피하지 못하게.
+    for q in re.findall(r"['‘]([^'’]+)['’]", text):
+        if not any(observe.quote_found(q, o["quote"], threshold) or observe.quote_found(q, o["behavior"], threshold)
+                   for o in section["observed"]):
+            return f"unquoted:{q}"
     return "ok"
 
 

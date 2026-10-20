@@ -198,6 +198,11 @@ def test_summary_check_rejects_judgement_missing_ref_and_made_up_quote():
     assert report.check_summary("기획안 2번에 확정 지급을 적었다. 대화에서는 동의했다[2].", s) == "no_ref"
     assert report.check_summary("기획안 2번에 확정 지급을 적었다[3].", s) == "bad_ref"
     assert report.check_summary('대화에서 "확률형은 꼭 넣어야 해요"라고 했다[2].', s).startswith("unquoted:")
+    # 중간점검 잠재적: 작은따옴표로 지어낸 인용도 잡는다. 근거에 있는 문서 제목은 통과
+    assert report.check_summary("지원자는 '확률형은 꼭 넣어야 한다'고 적었다[1].", s).startswith("unquoted:")
+    s2 = {"observed": [{"quote": "'지표 현황' 문서 열람", "behavior": "근거 문서 '지표 현황'을 직접 열어 확인함",
+                        "when": "01:32", "source": "문서 열람"}]}
+    assert report.check_summary("지원자는 '지표 현황' 문서를 직접 열어 확인했다[1].", s2) == "ok"
 
 
 def test_summary_skipped_when_single_evidence(monkeypatch):

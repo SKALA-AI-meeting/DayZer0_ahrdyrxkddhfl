@@ -150,7 +150,10 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
     for options in must_include:
         if not any(o in text for o in options):
             return f"missing:{options[0]}"
-    if 0 < minute < float("inf") and any(p in text for p in config()["verify"]["stale_deadline_phrases"]):
+    stale = config()["verify"]["stale_deadline_phrases"]
+    # 킥오프처럼 "2시간"을 꼭 말해야 하는 장면은 늦게 실행돼도(재시도 등) 이 검사를 하지 않는다
+    must_say_duration = any(o in p for opts in must_include for o in opts for p in stale)
+    if 0 < minute < float("inf") and not must_say_duration and any(p in text for p in stale):
         return f"stale_time:{clock.deadline_text(minute, scenario or None)}"   # 킥오프의 "2시간 뒤"를 그대로 반복
     if use_tools and required_tool and required_tool not in (called_tools or []):
         return "not_read"   # 검토를 부탁받았는데 공유 문서를 실제로 읽지 않음
