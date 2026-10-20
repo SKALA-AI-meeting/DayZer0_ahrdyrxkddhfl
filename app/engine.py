@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 
-from app import assistant, clock, graph, guard, report, settings, store
+from app import assistant, clock, docs, graph, guard, report, settings, store
 
 log = logging.getLogger("dayzero.engine")
 
@@ -40,10 +40,21 @@ async def tick(session_id: str, now: float | None = None) -> dict:
             log.exception("장면 실행 실패: session=%s scene=%s", session_id, scene["id"])
             break
 
+    announce_shared_docs(session_id, minute)
     status = "in_progress"
     if minute >= cfg["duration_minutes"]:
         status = finish(session_id)
     return {"minute": minute, "remaining": max(0, cfg["duration_minutes"] - minute), "status": status}
+
+
+def announce_shared_docs(session_id: str, minute: float) -> None:
+    """늦게 공개되는 문서가 열리면 시스템 알림을 한 번 보낸다(F-15). 공개 시각은 문서 목록 데이터를 따른다."""
+    s = store.get_session(session_id)
+    for d in docs.all_docs(s["company"], s["scenario"]):
+        # 장면 실행 기록을 같이 써서 여러 요청이 동시에 와도 한 번만 보낸다
+        if 0 < d["available_from_minute"] <= minute and store.claim_scene(session_id, f"doc_shared:{d['id']}", minute):
+            store.add_message(session_id, "system", "system",
+                              settings.config()["session"]["doc_shared_notice"].format(title=d["title"]), minute)
 
 
 async def send_message(session_id: str, channel: str, text: str, now: float | None = None) -> None:

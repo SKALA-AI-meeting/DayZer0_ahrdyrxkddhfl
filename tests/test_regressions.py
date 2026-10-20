@@ -143,3 +143,34 @@ def test_review_request_needs_request_form():
     assert persona.is_review_request("기획안 검토해 주실 수 있나요?")
     assert persona.is_review_request("한번 봐주세요")
     assert persona.is_review_request("리뷰 부탁드려요")
+
+
+# 회귀: 지원자가 먼저 분담을 물어 동료가 분담안을 말했는데, 00:10 장면이 같은 분담안을 또 말했다
+def test_negotiate_scene_does_not_repeat_split(monkeypatch):
+    from app import graph, persona
+    seen = {}
+
+    async def fake_speak(role, sid, minute, task, channels, **kw):
+        seen.update(task=task, must_include=kw.get("must_include"))
+        return "ok"
+    monkeypatch.setattr(persona, "speak", fake_speak)
+    sid = store.create_session("x")
+    state = {"session_id": sid, "minute": 10, "scenario": "moarun", "assignment": {},
+             "trigger": {"kind": "scene", "scene_id": "negotiate"}}
+    asyncio.run(graph.run_scene(state))
+    assert seen["must_include"]                                       # 처음이면 분담안을 그대로 전달
+    store.add_message(sid, "dm", "coworker", "1번·2번은 지원자님, 3번은 함께, 4번·5번은 제가 맡을게요", 7)
+    asyncio.run(graph.run_scene(state))
+    assert seen["must_include"] is None and "다시 나열하지 말고" in seen["task"]
+
+
+# 회귀: 인터뷰 요약이 01:05에 공개돼도 알림이 없어 팀장이 "늦게 공유될 예정"이라고 답했다
+def test_delayed_doc_release_is_announced_once():
+    from app import engine
+    sid = store.create_session("x")
+    engine.announce_shared_docs(sid, 60)
+    assert not [m for m in store.list_messages(sid) if m["sender"] == "system"]
+    engine.announce_shared_docs(sid, 66)
+    engine.announce_shared_docs(sid, 67)
+    notices = [m["content"] for m in store.list_messages(sid) if m["sender"] == "system"]
+    assert notices == ["'사용자 인터뷰 요약' 문서가 공유됐어요. 이제 회사 문서에서 열어 볼 수 있습니다."]

@@ -65,6 +65,15 @@ def _post(state: TurnState, channel: str, sender: str, text: str) -> None:
     store.add_message(state["session_id"], channel, sender, text, state["minute"])
 
 
+def _already_said(session_id: str, scene: dict) -> bool:
+    """장면 발화자가 이미 같은 채널에서 장면의 필수 내용(must_include)을 모두 말했는가."""
+    for m in store.list_messages(session_id, channels=(scene["channel"],)):
+        if m["sender"] == scene["speaker"] and all(any(o in m["content"] for o in opts)
+                                                   for opts in scene.get("must_include", [])):
+            return True
+    return False
+
+
 async def run_scene(state: TurnState) -> TurnState:
     """시나리오 장면을 실행한다. 전달 내용은 고정, 문장만 페르소나가 자연스럽게 바꾼다(PRD 6.4)."""
     scene = scene_by_id(state["trigger"]["scene_id"], state["scenario"])
@@ -89,15 +98,18 @@ async def run_scene(state: TurnState) -> TurnState:
         task = (f"기획안 {nums}에 넣을 너({names(state['scenario'])['coworker']})의 작업 내용을 공유 문서에 올렸으니, 지원자에게 "
                 "리뷰해 달라고 한두 문장으로 짧게 부탁하라. '내가 맡은 파트'라고 단정하지 마라. "
                 "지원자를 '도현님'이라고 부르지 마라. 내용을 요약하거나 특정 항목을 언급하지 마라.")
+    must_include, fallback = scene.get("must_include"), scene.get("fallback")
+    if scene.get("if_already_said") and _already_said(sid, scene):
+        # 지원자가 먼저 물어 이미 전달한 내용이면 반복하지 않고 짧게 확인한다(같은 말 두 번 방지)
+        task, must_include, fallback = scene["if_already_said"], None, scene["if_already_said_fallback"]
     # 장면 대사는 필수 내용(must_include)이 들어갔는지 코드가 검증하고, 끝내 빠지면 원문 대사를 쓴다(F-23).
     try:
         text = await persona.speak(scene["speaker"], sid, state["minute"], task, ALL_CHANNELS,
-                                   use_tools=False, must_include=scene.get("must_include"),
-                                   fallback=scene.get("fallback"))
+                                   use_tools=False, must_include=must_include, fallback=fallback)
     except Exception:   # LLM이 끝내 실패해도 세션이 멈추지 않게 정해진 대사로 진행한다(F-23, PRD A.4)
         log.exception("장면 대사 생성 실패, 대체 대사 사용: session=%s scene=%s", sid, scene["id"])
         llm.trace({"session": sid, "node": "graph.run_scene", "fallback": scene["id"]})
-        text = scene["fallback"]
+        text = fallback
     if shared:
         text += "\n\n" + "\n\n".join(shared)
         await _mark_coworker_cards(sid, state["assignment"], "done")
