@@ -45,8 +45,9 @@ def _session(minute: float) -> str:
     return sid
 
 
-async def scene_eval(repeat: int) -> list[str]:
+async def scene_eval(repeat: int) -> tuple[list[str], collections.Counter]:
     rows, first_ok, final_ok, total = [], 0, 0, 0
+    first_fail = collections.Counter()
     for scene in settings.scenes():
         if scene["speaker"] == "system":
             continue
@@ -59,10 +60,12 @@ async def scene_eval(repeat: int) -> list[str]:
                 must_include=scene["must_include"])
             total += 1
             first_ok += r["verdicts"][0] == "ok"
+            if r["verdicts"][0] != "ok":
+                first_fail[r["verdicts"][0].split(":")[0]] += 1
             final_ok += speak_graph.check(r["text"], scene["must_include"], [], False) == "ok"
         rows.append(scene["id"])
     return [f"| 장면 필수 내용 (F-23) | {len(rows)}개 장면 × {repeat}회 = {total} | "
-            f"{first_ok}/{total} | {final_ok}/{total} |"]
+            f"{first_ok}/{total} | {final_ok}/{total} |"], first_fail
 
 
 async def question_eval() -> tuple[list[str], collections.Counter]:
@@ -110,8 +113,9 @@ async def red_team_eval() -> list[str]:
 
 
 async def main(repeat: int) -> str:
-    scene_rows = await scene_eval(repeat)
-    q_rows, fails = await question_eval()
+    scene_rows, scene_fails = await scene_eval(repeat)
+    q_rows, q_fails = await question_eval()
+    fails = scene_fails + q_fails
     red_rows = await red_team_eval()
     lines = ["", "## 발화 검증 평가 (생성 → 코드 검증 → 재생성/대체)", "",
              "| 검증 지점 | 표본 | 첫 시도 통과 | 최종 결과 |", "|---|---|---|---|",

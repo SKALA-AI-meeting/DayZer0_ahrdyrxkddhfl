@@ -115,7 +115,7 @@ messages = [
 plan = { "3" = "재참여 리마인드 알림을 보낸다. 두 번째 모임 참여자에게 할인 가격의 유료 멤버십(월 구독)도 연다." }
 
 [case.expected."협력 태도"]
-helped = true
+helped = false   # "네 그럼요!"는 수락일 뿐, 함께 보거나 의견을 준 행동은 아니다
 scheduled = false
 declined = false
 [case.expected."책임감"]

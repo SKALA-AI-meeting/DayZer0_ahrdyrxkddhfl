@@ -45,14 +45,18 @@ def build_body(session_id: str, results: list[dict]) -> dict:
                 if guard.violates(behavior):
                     behavior = ""
                 when, quote = _minute_of(c["evidence_id"], session_id), c.get("quote", "")
+                point = c.get("point", "")
                 same = next((o for o in section["observed"] if o["when"] == when and o["quote"] == quote), None)
-                if same:   # 같은 인용이 여러 체크의 근거면 한 번만 보이고 행동 문장을 합친다
+                if same:   # 같은 인용이 여러 체크의 근거면 한 번만 보이고 행동 문장·관찰 포인트를 합친다
                     if behavior and behavior not in same["behavior"]:
                         same["behavior"] = f"{same['behavior']} / {behavior}" if same["behavior"] else behavior
+                    if point and point not in same["points"]:
+                        same["points"].append(point)
                     continue
                 eid = c["evidence_id"]
                 source = "기획안" if eid.startswith("plan:") else "문서 열람" if eid.startswith("view:") else "대화"
                 section["observed"].append({"behavior": behavior, "quote": quote, "when": when, "source": source,
+                                            "points": [point] if point else [],
                                             "message_id": int(eid[1:]) if eid[:1] == "m" and eid[1:].isdigit() else None})
         if "used" in r:   # AI 활용
             section["requests"] = [{"when": clock.format_minute(q["minute"]), "request": q["request"],

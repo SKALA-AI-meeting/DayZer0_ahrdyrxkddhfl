@@ -156,14 +156,27 @@ def test_report_labels_plan_part_and_merges_same_quote():
     sid = store.create_session("x")
     mid = store.add_message(sid, "dm", "candidate", "전설 상자 지급 좋은 듯합니다", 115)
     q = "확률형 아이템 대신 확정 지급 재화"
-    checks = [{"check_id": "noticed_error", "answer": "yes", "verified": True, "evidence_id": "plan:2", "quote": q, "behavior": "기획안에서 바꿈"},
-              {"check_id": "proposed_fix", "answer": "yes", "verified": True, "evidence_id": "plan:2", "quote": q, "behavior": "대안 반영"},
+    checks = [{"check_id": "noticed_error", "answer": "yes", "verified": True, "evidence_id": "plan:2", "quote": q,
+               "behavior": "기획안에서 바꿈", "point": "알리거나 고침"},
+              {"check_id": "proposed_fix", "answer": "yes", "verified": True, "evidence_id": "plan:2", "quote": q,
+               "behavior": "대안 반영", "point": "대안 제안"},
               {"check_id": "endorsed_issue", "answer": "yes", "verified": True, "evidence_id": f"m{mid}",
                "quote": "전설 상자 지급 좋은 듯합니다", "behavior": "동료 제안에 동의함"}]
     obs = report.build_body(sid, [{"element": "존중·소통", "situation": "s", "happened": True, "checks": checks}])["sections"][0]["observed"]
     assert len(obs) == 2
     assert obs[0]["when"] == "기획안 2번" and obs[0]["behavior"] == "기획안에서 바꿈 / 대안 반영" and obs[0]["message_id"] is None
     assert obs[1]["when"] == "01:55" and obs[1]["message_id"] == mid
+    assert obs[0]["points"] == ["알리거나 고침", "대안 제안"] and obs[1]["points"] == []
+
+
+def test_observed_checks_carry_observation_point():
+    sid = store.create_session("x")
+    store.add_message(sid, "team", "candidate", "대상을 바꿔서 1번부터 다시 쓸게요", 72)
+    spec = {"name": "유연성", "situation": "대상 변경", "scene": "flex_change", "window_end_minute": 120,
+            "candidate_keywords": ["대상"], "checks": [{"id": "keyword", "point": "바뀐 대상에 반응함"}]}
+    result = asyncio.run(observe.observe_element(sid, spec, {"flex_change": 70}, mode="rules"))
+    checks = observe._with_points(result["checks"], spec["checks"])
+    assert checks[0]["point"] == "바뀐 대상에 반응함"
 
 
 def _section():

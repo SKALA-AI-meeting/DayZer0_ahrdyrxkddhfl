@@ -121,6 +121,12 @@ def verify(answers: list[CheckAnswer], evidence: dict[str, str],
     return out
 
 
+def _with_points(checks: list[dict], spec_checks: list[dict]) -> list[dict]:
+    """판별 결과마다 관찰 포인트(리포트 표시용 문구)를 붙인다. 어떤 기준으로 근거가 됐는지 담당자가 보게."""
+    points = {c["id"]: c.get("point", "") for c in spec_checks}
+    return [{**c, "point": c.get("point") or points.get(c["check_id"], "")} for c in checks]
+
+
 # ---------- LLM 판별 ----------
 
 async def _judge(session_id: str, situation: str, checks: list[dict], transcript: str,
@@ -183,7 +189,7 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     evidence = _evidence_texts(messages, plan or {})
     scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
     required = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
-    return {**base, "happened": True, "checks": verify(answers, evidence, scopes, required)}
+    return {**base, "happened": True, "checks": _with_points(verify(answers, evidence, scopes, required), spec["checks"])}
 
 
 # ---------- AI 활용 ----------
@@ -238,7 +244,7 @@ async def observe_ai_use(session_id: str, mode: str = "hybrid", use_cache: bool 
     evidence.update({f"plan:{k}": v for k, v in plan.items()})
     scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
     return {**base, "used": True, "requests": reuse,
-            "checks": verify(answers, evidence, scopes) + doc_checks}
+            "checks": _with_points(verify(answers, evidence, scopes), spec["checks"]) + doc_checks}
 
 
 def cross_checked_docs(session_id: str, log: list[dict]) -> list[dict]:
@@ -260,6 +266,7 @@ def cross_checked_docs(session_id: str, log: list[dict]) -> list[dict]:
             if hit:
                 seen.add(doc_id)
                 out.append({"check_id": "verified_doc_view", "answer": "yes", "verified": True,
+                            "point": "AI 답의 근거 문서를 직접 열어 확인함",
                             "evidence_id": f"view:{hit['minute']}", "quote": f"'{title}' 문서 열람",
                             "behavior": f"지원자가 AI 어시스턴트 답의 근거 문서 '{title}'을(를) 직접 열어 확인함"})
     return out

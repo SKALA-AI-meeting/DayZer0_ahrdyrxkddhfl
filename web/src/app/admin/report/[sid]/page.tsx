@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import Nav from "@/components/Nav";
 import { api, Msg } from "@/lib/api";
 
-type Observed = { behavior: string; quote: string; when: string; source?: string; message_id?: number | null };
+type Observed = { behavior: string; quote: string; when: string; source?: string; message_id?: number | null; points?: string[] };
 type Section = {
   element: string; situation: string; observed: Observed[]; note?: string; summary?: string;
   followups?: { id: number; when: string }[];
@@ -63,7 +63,10 @@ export default function ReportPage() {
               )}
               {s.observed.map((o, i) => (
                 <div key={i} className="obs">
-                  <div><span className="muted small">[{i + 1}] </span><span className="time">{o.source === "대화" ? `${o.when} 대화` : o.when}</span>{o.behavior}</div>
+                  {o.points && o.points.length > 0 && (
+                    <div className="muted small">[{i + 1}] 관찰 포인트: {o.points.join(" · ")}</div>
+                  )}
+                  <div>{!(o.points && o.points.length) && <span className="muted small">[{i + 1}] </span>}<span className="time">{o.source === "대화" ? `${o.when} 대화` : o.when}</span>{o.behavior}</div>
                   <div className="quote">
                     “{o.quote}”{" "}
                     {o.message_id ? <a href="#" onClick={(e) => { e.preventDefault(); jumpTo(o.message_id!); }}>대화에서 보기</a>
