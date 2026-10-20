@@ -229,6 +229,21 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     required = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
     forbidden = {c["id"]: c["quote_must_not_contain"] for c in spec["checks"] if c.get("quote_must_not_contain")}
     checks = _mark_missing(verify(answers, evidence, scopes, required, forbidden), missing)
+    for _ in range(config()["observation"]["judge_dropped_retries"]):
+        # 근거가 검증에서 버려진 체크만 이유를 알려 주고 다시 묻는다(검증 → 피드백 → 재시도)
+        dropped = {c["check_id"]: c["dropped_reason"] for c in checks
+                   if c.get("dropped_reason") and c["dropped_reason"] != MISSING_REASON}
+        if not dropped:
+            break
+        notes = "; ".join(f"{cid}: {reason}" for cid, reason in dropped.items())
+        retry_hint = (f"{hint}\n앞선 답의 근거가 코드 검증에서 버려졌다({notes}). '지원자' 메시지(또는 허용된 기획안) 중에서 "
+                      "그 질문이 묻는 행동을 직접 보여 주는 원문을 다시 찾아 인용하라. 동료·팀장의 말은 근거가 아니다. 없으면 no.")
+        sub = [c for c in spec["checks"] if c["id"] in dropped]
+        again, still_missing = await _judge(session_id, spec["situation"], sub,
+                                            _format(messages, plan, store.get_session(session_id)["scenario"]),
+                                            retry_hint, use_cache)
+        redo = {c["check_id"]: c for c in _mark_missing(verify(again, evidence, scopes, required, forbidden), still_missing)}
+        checks = [redo.get(c["check_id"], c) if c["check_id"] in dropped else c for c in checks]
     return {**base, "happened": True, "checks": _with_points(checks, spec["checks"])}
 
 

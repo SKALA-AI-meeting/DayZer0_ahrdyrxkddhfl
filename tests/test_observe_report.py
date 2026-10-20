@@ -302,3 +302,31 @@ def test_report_merges_quote_contained_in_another():
                "quote": "운영 정책에 확률형 금지 항목이 있어서", "point": "근거 제시"}]
     obs = report.build_body(sid, [{"element": "존중·소통", "situation": "s", "happened": True, "checks": checks}])["sections"][0]["observed"]
     assert len(obs) == 1 and obs[0]["points"] == ["알림", "근거 제시"] and obs[0]["quote"].startswith("그런데")
+
+
+# 회귀: 판별기가 지원자 의견(00:42)을 '일정 조율'에 넣고, '의견을 줌'에는 동료 말을 인용해 버려졌다
+# → 일정 포인트는 시점 표현이 있어야 인정, 버려진 체크는 이유를 알려 다시 묻는다
+def test_dropped_checks_are_reasked_with_reason(monkeypatch):
+    from app import settings
+    sid = store.create_session("x", scenario="pixel")
+    store.add_message(sid, "dm", "coworker", "비슷한 게임 사례 기준이 헷갈려요. 10분만 같이 봐줄 수 있을까요?", 30)
+    co = store.add_message(sid, "dm", "coworker", "어떤 사례를 찾고 싶은지 기준을 정리해 보면 좋겠어요", 37)
+    me = store.add_message(sid, "dm", "candidate", "전투 기능이 있는 게임을 찾아보면 좋을 것 같아요", 42)
+    spec = [e for e in settings.observation_spec("pixel")["element"] if e["name"] == "협력 태도"][0]
+    replies = [
+        [CheckAnswer(check_id="helped", answer="yes", evidence_id=f"m{co}", quote="어떤 사례를 찾고 싶은지 기준을 정리해 보면 좋겠어요"),
+         CheckAnswer(check_id="scheduled", answer="yes", evidence_id=f"m{me}", quote="전투 기능이 있는 게임을 찾아보면 좋을 것 같아요"),
+         CheckAnswer(check_id="declined", answer="no")],
+        [CheckAnswer(check_id="helped", answer="yes", evidence_id=f"m{me}", quote="전투 기능이 있는 게임을 찾아보면 좋을 것 같아요"),
+         CheckAnswer(check_id="scheduled", answer="no")]]
+    asked = []
+
+    async def fake(model, messages, node, sid_=""):
+        asked.append(messages[1].content)
+        return observe.Judgement(answers=replies.pop(0))
+    monkeypatch.setattr(observe.llm, "ainvoke", fake)
+    r = asyncio.run(observe.observe_element(sid, spec, {"coop_help": 30}, use_cache=False))
+    got = {c["check_id"]: c for c in r["checks"]}
+    assert got["helped"]["verified"] and got["helped"]["evidence_id"] == f"m{me}"
+    assert got["scheduled"]["answer"] == "no" and got["declined"]["answer"] == "no"
+    assert len(asked) == 2 and "코드 검증에서 버려졌다" in asked[1] and "- declined" not in asked[1]
