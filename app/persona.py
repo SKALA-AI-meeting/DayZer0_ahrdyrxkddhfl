@@ -1,0 +1,75 @@
+"""동료(이도현)·팀장(한서윤)·어시스턴트의 말을 만든다.
+
+- 대화 맥락은 최근 메시지를 history_token_budget 안에서 잘라 넣는다(Harness: Context).
+- 출력에 판정 표현이 있으면 한 번 다시 만들고, 그래도 있으면 안내문으로 바꾼다(F-24).
+"""
+from langchain_core.messages import HumanMessage
+
+from app import agent_loop, clock, guard, store
+from app.mcp_client import doc_tools
+from app.settings import PART_TITLES, config, prompt
+
+NAMES = {"candidate": "지원자", "coworker": "이도현", "lead": "한서윤 팀장",
+         "system": "시스템", "assistant": "AI 어시스턴트", "both": "함께"}
+CHARS_PER_TOKEN = 2   # 한국어 대략치: Token 예산을 글자 수로 바꿀 때 쓰는 근사 상수
+
+
+def transcript(session_id: str, channels: tuple[str, ...]) -> str:
+    """최근 대화를 예산 안에서 잘라 텍스트로 만든다. 넘친 앞부분은 생략 표시만 남긴다."""
+    budget = config()["context"]["history_token_budget"] * CHARS_PER_TOKEN
+    lines = [f"[{clock.format_minute(m['minute'])}][{m['channel']}] {NAMES[m['sender']]}: {m['content']}"
+             for m in store.list_messages(session_id, channels=channels)]
+    kept, size = [], 0
+    for line in reversed(lines):
+        if size + len(line) > budget:
+            break
+        kept.append(line)
+        size += len(line)
+    skipped = len(lines) - len(kept)
+    head = [f"(이전 대화 {skipped}개 생략)"] if skipped else []
+    return "\n".join(head + list(reversed(kept))) or "(아직 대화 없음)"
+
+
+def docs_text(minute: float) -> str:
+    """지금 볼 수 있는 회사 문서 목록 (모델이 없는 문서를 다른 문서로 대신 답하지 않게 알려 준다)."""
+    from app.settings import docs_index
+    return ", ".join(f"{d['title']}(doc_id={d['id']})"
+                     for d in clock.available_docs(docs_index(), minute))
+
+
+def assignment_text(assignment: dict[str, str]) -> str:
+    """분담안을 사람이 읽는 문장으로 바꾼다."""
+    return ", ".join(f"{p}번 {PART_TITLES[p]}: {NAMES[o]}" for p, o in sorted(assignment.items()))
+
+
+async def speak(role: str, session_id: str, minute: float, task: str,
+                channels: tuple[str, ...], use_tools: bool = True) -> str:
+    """페르소나(coworker | lead)의 다음 메시지를 만든다.
+
+    Args:
+        role: "coworker" 또는 "lead".
+        session_id: 세션 id.
+        minute: 현재 세션 시각(분). 문서 공개 시각 판단에 쓴다.
+        task: 이번에 할 일(장면의 전달 내용 또는 "지원자 메시지에 답하기").
+        channels: 맥락으로 볼 채널.
+        use_tools: 회사 문서 검색 도구를 줄지 여부.
+    """
+    session = store.get_session(session_id)
+    system = (f"{prompt(role)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
+              f"- 현재 분담: {assignment_text(session['assignment'])}\n"
+              f"- 지금 볼 수 있는 회사 문서: {docs_text(minute)} (이 목록에 없는 문서는 아직 볼 수 없다)")
+    human = HumanMessage(f"최근 대화:\n{transcript(session_id, channels)}\n\n지금 할 일: {task}\n"
+                         "메신저에 보낼 메시지 본문만 써라.")
+    for _ in range(2):   # 판정 표현이 나오면 한 번 다시 생성
+        if use_tools:
+            async with doc_tools(minute) as tools:
+                text, _ = await agent_loop.run(system, [human], tools,
+                                               config()["llm"]["persona_temperature"],
+                                               f"persona.{role}", session_id)
+        else:
+            text, _ = await agent_loop.run(system, [human], [],
+                                           config()["llm"]["persona_temperature"],
+                                           f"persona.{role}", session_id)
+        if not guard.violates(text):
+            return text.strip()
+    return guard.notice()

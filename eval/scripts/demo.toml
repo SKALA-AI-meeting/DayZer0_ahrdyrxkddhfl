@@ -1,0 +1,69 @@
+# 터미널 시뮬레이션용 지원자 행동 대본 (평가셋의 첫 사례로도 쓴다).
+# kind: dm(동료 1:1) | team(팀 채널) | assistant(AI 어시스턴트) | part(기획안 저장) | submit
+# 이 지원자는 "협업 행동이 잘 드러나는" 사례다. 기대 관찰은 expected에 적는다(관찰 단계에서 사용).
+
+[[action]]
+at_minute = 12
+kind = "dm"
+text = "좋아요, 제안해 주신 대로 나눠서 할게요!"
+
+[[action]]
+at_minute = 20
+kind = "assistant"
+text = "지표 현황 문서에서 재참여율과 모임 규모별 차이를 요약해 줘. 첫 참여자 재참여를 높이는 기획에 쓸 거야."
+
+[[action]]
+at_minute = 25
+kind = "part"
+part = "1"
+text = "문제: 첫 모임 참여자 중 22%만 두 번째 모임에 나온다. 대상: 첫 모임에 참여한 20~30대 직장인."
+
+[[action]]
+at_minute = 32
+kind = "dm"
+text = "지금 1번 마무리 중이라 10분 뒤에 같이 볼게요. 사례는 '첫 참여 후 재방문 유도' 기준으로 골라 보면 어떨까요?"
+
+[[action]]
+at_minute = 52
+kind = "team"
+text = "팀장님, 인터뷰 자료가 15분 늦게 와서 2번 파트가 조금 늦어질 것 같아요. 그동안 1번 문제 정의를 먼저 다듬어 둘게요."
+
+[[action]]
+at_minute = 55
+kind = "assistant"
+text = "사용자 인터뷰 요약 내용 알려줘"
+
+[[action]]
+at_minute = 67
+kind = "assistant"
+text = "사용자 인터뷰 요약에서 재참여하지 않은 이유를 정리해 줘"
+
+[[action]]
+at_minute = 72
+kind = "team"
+text = "네, 대상을 3개월 넘게 안 나온 사용자로 바꿀게요. 1번 대상 정의를 다시 쓰고, 5번 지표도 바뀌어야 할 것 같은데 도현님과 다시 나눠 볼게요."
+
+[[action]]
+at_minute = 80
+kind = "part"
+part = "1"
+text = "문제: 3개월 넘게 모임에 안 나온 사용자가 다시 돌아오지 않는다. 대상: 3개월 이상 미참여 사용자."
+
+[[action]]
+at_minute = 93
+kind = "dm"
+text = "도현님, 3번의 유료 멤버십은 운영 정책상 올해 유료 기능을 내지 않기로 해서 어려울 것 같아요. 할인 대신 무료 리워드(배지)로 바꾸면 어떨까요?"
+
+[[action]]
+at_minute = 105
+kind = "assistant"
+text = "평가 기준이 뭐야?"
+
+[[action]]
+at_minute = 111
+kind = "team"
+text = "기획안 제출했습니다. 대상 변경을 반영했고, 3번은 유료 멤버십 대신 무료 리워드로 바꿨어요."
+
+[[action]]
+at_minute = 112
+kind = "submit"

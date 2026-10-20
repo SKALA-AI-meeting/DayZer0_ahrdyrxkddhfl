@@ -1,0 +1,15 @@
+# 분업 조정 경로 확인용 짧은 대본 (F-21): 다르게 나누자고 요청 → 동료 재제안 → 동의.
+
+[[action]]
+at_minute = 11
+kind = "dm"
+text = "4번 사례 조사는 제가 해 보고 싶어요. 대신 2번 인터뷰 근거는 도현님이 맡아 주실 수 있을까요?"
+
+[[action]]
+at_minute = 13
+kind = "dm"
+text = "네 좋아요, 그렇게 진행해요."
+
+[[action]]
+at_minute = 15
+kind = "submit"

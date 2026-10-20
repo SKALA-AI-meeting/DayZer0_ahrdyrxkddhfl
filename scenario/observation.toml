@@ -1,0 +1,72 @@
+# 관찰 항목 정의 (하이브리드 B)
+# - 요소·상황·관찰 포인트는 PRD 5.3, 6.4 그대로다.
+# - 체크 항목은 모두 "행동"으로 정의한다 (말투·공손함 항목 금지, PRD 15장 평가 편향).
+# - window: 이벤트 시점부터 window_end_minute까지의 지원자 메시지·문서만 본다.
+#   책임감·유연성·존중·소통은 "마감 전"을 봐야 하므로 마감(110분)까지 본다.
+# - candidate_keywords: 관련 메시지 "후보"를 넓게 찾는 용도. 키워드만으로 확정하지 않는다.
+#   후보가 0개여도 LLM은 구간 전체 메시지를 본다(키워드 누락 대비).
+# - checks: LLM이 예/아니오 + 원문 인용으로 답한다. 인용은 코드가 실제 메시지와 대조해 검증한다.
+# - 결과는 내부용이며, 리포트에는 "관찰된 행동 + 근거 원문"만 보인다(개수·점수 표시 없음).
+
+[[element]]
+name = "협력 태도"
+scene = "coop_help"
+situation = "내 일이 바쁠 때 동료의 도움 요청"
+window_end_minute = 50
+candidate_keywords = ["같이", "도와", "봐줄", "볼게", "나중에", "이따", "지금은", "끝나고", "분 뒤", "어려울"]
+checks = [
+  { id = "helped", question = "지원자가 동료의 도움 요청에 응해 실제로 함께 보거나 의견을 줬는가?" },
+  { id = "scheduled", question = "지원자가 자기 일정과 조율해 언제 도울 수 있는지 제안했는가?" },
+  { id = "declined", question = "지원자가 도움 요청을 거절했는가?" },
+]
+
+[[element]]
+name = "책임감"
+scene = "resp_delay"
+situation = "담당 파트에 필요한 인터뷰 자료 지연"
+window_end_minute = 110
+candidate_keywords = ["지연", "늦", "밀리", "밀릴", "아직", "못 받", "안 와", "늦어", "먼저", "대신", "그동안"]
+checks = [
+  { id = "shared_delay", question = "지원자가 마감 전에 팀장이나 동료에게 자료 지연이나 그로 인한 일정 영향을 먼저 알렸는가?" },
+  { id = "proposed_alternative", question = "지원자가 대안(먼저 할 수 있는 부분부터 진행, 순서 변경 등)을 내거나 실행했는가?" },
+]
+
+[[element]]
+name = "유연성"
+scene = "flex_change"
+situation = "막판 요구사항 변경 (대상: 3개월 넘게 모임에 안 나온 사용자)"
+window_end_minute = 110
+candidate_keywords = ["3개월", "3달", "석 달", "휴면", "안 나온", "미참여", "이탈", "대상", "범위", "분담", "일정"]
+checks = [
+  { id = "asked_clarification", question = "지원자가 바뀐 방향의 배경이나 범위를 확인하는 질문을 했는가?" },
+  { id = "rescoped", question = "지원자가 범위·분담·일정을 다시 정하자고 제안했는가?" },
+  { id = "reflected_in_plan", question = "지원자가 바뀐 대상(3개월 넘게 모임에 안 나온 사용자)을 기획안에 반영했는가?" },
+]
+# reflected_in_plan은 메시지뿐 아니라 기획안 최종본도 함께 본다.
+include_plan_document = true
+
+[[element]]
+name = "존중·소통"
+scene = "respect_review"
+situation = "동료 파트에 회사 정책과 어긋나는 내용 (유료 멤버십)"
+window_end_minute = 110
+candidate_keywords = ["정책", "유료", "멤버십", "할인", "결제", "과금", "올해"]
+checks = [
+  { id = "noticed_error", question = "지원자가 동료 파트의 유료 멤버십이 문제라는 점을 동료에게 알렸거나, 기획안에서 그 부분을 고쳤는가?" },
+  { id = "cited_basis", question = "지원자가 그 근거(운영 정책: 올해 유료 기능 없음)를 함께 제시했는가?" },
+  { id = "proposed_fix", question = "지원자가 문제를 지적하는 데 그치지 않고 대안이나 수정 방향을 제안하거나 기획안에 반영했는가?" },
+]
+# 말없이 기획안만 고치는 경우도 "알아챔"으로 보기 위해 기획안 최종본도 함께 본다.
+include_plan_document = true
+
+# AI 활용: 이벤트 없이 세션 전체를 본다 (PRD 5.3).
+[ai_use]
+name = "AI 활용"
+situation = "세션 전체"
+checks = [
+  { id = "delegation", question = "지원자가 AI 어시스턴트에 일을 맡겼는가? (yes라면 behavior에 맡긴 일을 한 문장으로 요약)" },
+  { id = "context_provided", question = "지원자의 요청에 과제 목표, 대상 사용자, 회사 정책 같은 조건이 담겨 있었는가?" },
+  { id = "verified", question = "지원자가 AI 결과를 회사 문서와 대조하거나 확인하는 행동을 했는가?" },
+]
+# F-31 "그대로 씀 / 고쳐 씀" 구분은 규칙(유사도)으로 한다. 기준값은 config.toml [observation].
+# F-33 어시스턴트 요청이 0건이면 LLM을 부르지 않고 "사용하지 않음"으로만 표시한다(규칙).

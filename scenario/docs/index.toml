@@ -1,0 +1,34 @@
+# 회사 문서 목록 (PRD 6.3)
+# available_from_minute: 세션 시각이 이 값 이상일 때만 열람·검색 가능 (F-15).
+# 인터뷰 요약은 00:50 지연 알림 후 01:05(65분)에 공개 — PRD 고정값.
+# 본문 중 PRD에 없는 수치·발언은 비교 가능성을 위해 팀 공통으로 맞춰야 한다(가이드 7절).
+
+[[doc]]
+id = "company"
+title = "회사·서비스 소개"
+file = "company.md"
+available_from_minute = 0
+
+[[doc]]
+id = "metrics"
+title = "지표 현황"
+file = "metrics.md"
+available_from_minute = 0
+
+[[doc]]
+id = "interviews"
+title = "사용자 인터뷰 요약"
+file = "interviews.md"
+available_from_minute = 65
+
+[[doc]]
+id = "policy"
+title = "운영 정책"
+file = "policy.md"
+available_from_minute = 0
+
+[[doc]]
+id = "meeting"
+title = "지난주 회의록"
+file = "meeting.md"
+available_from_minute = 0

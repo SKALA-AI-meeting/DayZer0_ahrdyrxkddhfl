@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "mcp_servers*"]
+exclude = ["tests*", "web*", "eval*"]
+
+[project]
+name = "dayzero-mvp"
+version = "0.1.0"
+description = "Day Zero MVP: AI 동료 협업 시뮬레이션 채용 평가"
+requires-python = ">=3.11,<3.14"
+# 의존성은 수업 템플릿(ai-agent-capstone)과 같은 범위. 실제 버전은 uv.lock에 고정된다.
+dependencies = [
+    "fastapi>=0.110,<1",
+    "uvicorn>=0.30,<1",
+    "pydantic>=2.8,<3",
+    "httpx>=0.27,<1",
+    "python-dotenv>=1,<2",
+    "langchain>=1,<2",
+    "langchain-openai>=1,<2",
+    "langchain-mcp-adapters>=0.1,<1",
+    "langgraph>=1,<2",
+    "mcp>=1.15,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.7,<1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

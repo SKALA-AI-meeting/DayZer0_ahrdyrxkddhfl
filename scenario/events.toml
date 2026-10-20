@@ -1,0 +1,70 @@
+# 공통 시나리오: 세션 진행 장면과 이벤트 (PRD 5.2, 6.4, F-20, F-21, F-26 그대로)
+# 시점(at_minute)·발화자·전달 내용은 PRD 고정값이다. Slack 합의 없이 바꾸지 않는다.
+# "message"는 전달할 내용이다. 실제 문장은 페르소나가 대화 흐름에 맞게 자연스럽게 바꿔 말한다(PRD 6.4).
+# channel: team = 팀 채널, dm = 동료 1:1, system = 시스템 알림
+
+[[scene]]
+id = "kickoff"
+at_minute = 0
+speaker = "lead"
+channel = "team"
+element = ""
+message = "첫 모임에 나온 사용자가 두 번째 모임에도 다시 나오게 만드는 신규 기능을 기획해 주세요. 2시간 뒤 2~3쪽 기획안을 공유 문서로 받겠습니다. 필요하면 AI 어시스턴트를 써도 됩니다."
+
+[[scene]]
+id = "kickoff_greeting"
+at_minute = 0
+speaker = "coworker"
+channel = "team"
+element = ""
+message = "오늘 합류한 지원자에게 반갑게 인사한다. 입사 2년 차 기획자 이도현으로 자기소개한다."
+
+[[scene]]
+id = "negotiate"
+at_minute = 10
+speaker = "coworker"
+channel = "dm"
+element = ""
+message = "기본 분담안을 제안한다: 1·2번은 지원자, 3번은 함께, 4·5번은 이도현. 다르게 나누고 싶으면 말해 달라고 한다."
+
+[[scene]]
+id = "coop_help"
+at_minute = 30
+speaker = "coworker"
+channel = "dm"
+element = "협력 태도"
+message = "비슷한 서비스 사례를 찾는데 기준이 헷갈려요. 10분만 같이 봐줄 수 있을까요?"
+
+[[scene]]
+id = "resp_delay"
+at_minute = 50
+speaker = "system"
+channel = "system"
+element = "책임감"
+message = "사용자 인터뷰 요약이 리서치 담당자 사정으로 15분 늦게 공유됩니다."
+
+[[scene]]
+id = "flex_change"
+at_minute = 70
+speaker = "lead"
+channel = "team"
+element = "유연성"
+message = "대표님과 이야기해 보니 대상을 바꿔야겠어요. 첫 참여자 말고 3개월 넘게 모임에 안 나온 사용자로 가 주세요. 마감은 그대로예요."
+
+[[scene]]
+id = "respect_review"
+at_minute = 90
+speaker = "coworker"
+channel = "dm"
+element = "존중·소통"
+message = "자기 파트를 공유하며 리뷰를 부탁한다. 공유한 핵심 기능에 '재참여 시 할인되는 유료 멤버십'이 들어 있다. (운영 정책과 어긋난다는 사실은 말하지 않는다)"
+# 이 장면에서 동료 파트가 공유 문서에 채워진다(F-13). 내용은 coworker_parts.toml.
+shares_coworker_parts = true
+
+[[scene]]
+id = "deadline_report"
+at_minute = 110
+speaker = "lead"
+channel = "team"
+element = ""
+message = "마감입니다. 기획안을 제출하고 진행 내용을 보고해 달라고 요청한다."
