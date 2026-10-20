@@ -15,6 +15,7 @@ verify가 검사하는 것 (모두 코드, LLM 아님):
 - 출처(F-22): 답에 밝힌 회사 문서가 실제로 이번에 도구로 읽은 문서인지
 """
 import asyncio
+import json
 from typing import TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -46,6 +47,25 @@ class SpeakState(TypedDict, total=False):
     text: str
     verdict: str                  # ok | judgement | missing:<사실> | citation:<문서>
     verdicts: list[str]           # 시도별 검증 결과(평가·기록용)
+
+
+def read_titles_from(result) -> list[str]:
+    """도구 결과에서 내용(excerpt·body)이 실제로 온 문서 제목만 뽑는다.
+
+    "아직 공유되지 않음" 안내(notice)만 온 문서는 읽은 것으로 치지 않는다. 결과 항목을 하나씩
+    보므로, 안내가 섞여 있어도 함께 온 다른 문서는 읽은 것으로 인정된다.
+    """
+    blocks = result if isinstance(result, list) else [result]
+    items: list = []
+    for b in blocks:
+        raw = b.get("text", "") if isinstance(b, dict) and "text" in b else b
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError:
+            continue
+        items += parsed if isinstance(parsed, list) else [parsed]
+    return [i["title"] for i in items
+            if isinstance(i, dict) and i.get("title") and ("excerpt" in i or "body" in i)]
 
 
 def tool_text(result) -> str:
@@ -92,12 +112,12 @@ async def tools_node(state: SpeakState) -> SpeakState:
                 text = f"없는 도구입니다: {tc['name']}"
             else:
                 try:
-                    text = tool_text(await by_name[tc["name"]].ainvoke(tc["args"]))
+                    raw = await by_name[tc["name"]].ainvoke(tc["args"])
+                    text = tool_text(raw)
+                    # 공개된 문서 내용(발췌·본문)이 실제로 돌아온 문서만 "읽은 문서"로 인정한다
+                    titles += read_titles_from(raw)
                 except Exception as exc:   # 도구 오류는 모델에게 알려 다른 방법을 찾게 한다
                     text = f"도구 오류: {exc}"
-                # 공개된 문서 내용이 실제로 돌아온 경우만 "읽은 문서"로 인정한다
-                titles += [d["title"] for d in docs.all_docs(state["company"])
-                           if d["title"] in text and "아직 공유되지" not in text]
             out.append(ToolMessage(text[:max_chars], tool_call_id=tc["id"]))
     called = state["called_tools"] + [tc["name"] for tc in state["messages"][-1].tool_calls]
     return {"messages": state["messages"] + out, "tool_calls": calls, "streak": streak,
