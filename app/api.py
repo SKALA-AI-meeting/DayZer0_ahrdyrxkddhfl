@@ -68,6 +68,7 @@ class SignupIn(BaseModel):
     email: str
     password: str
     company: str
+    scenario: str = ""      # 회사의 업무 시나리오 팩. 가입할 때 한 번 정한다. 비우면 기본 팩(공통 PRD)
 
 
 class LoginIn(BaseModel):
@@ -80,14 +81,10 @@ class InviteIn(BaseModel):
     email: str = ""
 
 
-class ScenarioIn(BaseModel):
-    scenario: str
-
-
 @app.post("/api/auth/signup")
 def signup(body: SignupIn) -> dict:
     try:
-        return {"token": auth.signup(body.email, body.password, body.company)}
+        return {"token": auth.signup(body.email, body.password, body.company, body.scenario)}
     except auth.AuthError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -121,27 +118,16 @@ def _pack_public(pack: str) -> dict:
     return {k: info[k] for k in keys}
 
 
-@app.get("/api/admin/scenarios")
-def scenarios(admin: dict = Depends(_admin)) -> list[dict]:
-    """고를 수 있는 시나리오 팩 목록(기업 맞춤 시나리오). 첫 번째가 기본(공통 PRD)."""
+@app.get("/api/scenarios")
+def scenarios() -> list[dict]:
+    """가입 화면에서 고를 시나리오 팩 목록. 첫 번째가 기본(공통 PRD). 가상 회사 정보뿐이라 로그인 없이 보인다."""
     return [_pack_public(p) for p in settings.pack_ids()]
 
 
 @app.get("/api/admin/scenario")
 def company_scenario(admin: dict = Depends(_admin)) -> dict:
-    """이 기업의 시나리오. 지원자를 한 명이라도 초대했으면 잠긴다(PRD 5.5 같은 조건)."""
-    return {"current": _pack_public(store.company_scenario(admin["company"])),
-            "locked": store.company_has_candidates(admin["company"])}
-
-
-@app.put("/api/admin/scenario")
-def set_company_scenario(body: ScenarioIn, admin: dict = Depends(_admin)) -> dict:
-    if body.scenario not in settings.pack_ids():
-        raise HTTPException(400, f"없는 시나리오입니다: {body.scenario}")
-    if store.company_has_candidates(admin["company"]):
-        raise HTTPException(409, "이미 초대한 지원자가 있어 시나리오를 바꿀 수 없습니다. 같은 채용의 지원자는 모두 같은 시나리오를 씁니다.")
-    store.set_company_scenario(admin["company"], body.scenario)
-    return company_scenario(admin)
+    """이 기업의 시나리오(가입할 때 정해지고 바뀌지 않는다. PRD 5.5 같은 조건)."""
+    return {"current": _pack_public(store.company_scenario(admin["company"]))}
 
 
 @app.get("/api/admin/candidates")

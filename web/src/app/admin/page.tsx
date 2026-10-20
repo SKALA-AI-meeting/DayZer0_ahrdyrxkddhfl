@@ -28,7 +28,7 @@ export default function AdminHome() {
   const [alias, setAlias] = useState("");
   const [email, setEmail] = useState("");
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [mine, setMine] = useState<{ current: Scenario; locked: boolean } | null>(null);
+  const [mine, setMine] = useState<{ current: Scenario } | null>(null);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<{ alias: string; url: string } | null>(null);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
@@ -36,7 +36,7 @@ export default function AdminHome() {
   const load = useCallback(async () => {
     try {
       setMe(await api("/admin/me", {}, true));
-      setScenarios(await api("/admin/scenarios", {}, true));
+      setScenarios(await api("/scenarios"));
       setMine(await api("/admin/scenario", {}, true));
       setRows(await api("/admin/candidates", {}, true));
     } catch (err) {
@@ -56,15 +56,6 @@ export default function AdminHome() {
     try {
       await api(`/admin/reports/${id}/retry`, { method: "POST" }, true);
       load();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function chooseScenario(id: string) {
-    setError("");
-    try {
-      setMine(await api("/admin/scenario", { method: "PUT", body: JSON.stringify({ scenario: id }) }, true));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -101,17 +92,7 @@ export default function AdminHome() {
           {mine && (
             <div className="notice small" style={{ marginBottom: 12 }}>
               업무 시나리오: <b>{mine.current.company} · {mine.current.task_title}</b>
-              {mine.locked ? (
-                <span className="muted"> — 이미 지원자를 초대해 바꿀 수 없어요. 모든 지원자가 같은 조건에서 평가받도록 한 기업은 한 시나리오만 씁니다.</span>
-              ) : (
-                <>
-                  {" "}
-                  <select value={mine.current.id} onChange={(e) => chooseScenario(e.target.value)} style={{ maxWidth: 300 }}>
-                    {scenarios.map((s) => <option key={s.id} value={s.id}>{s.company} · {s.task_title}</option>)}
-                  </select>
-                  <span className="muted"> 첫 지원자를 초대하면 고정됩니다.</span>
-                </>
-              )}
+              <span className="muted"> — 가입할 때 정한 시나리오예요. 모든 지원자가 같은 조건에서 평가받도록 바꿀 수 없어요.</span>
             </div>
           )}
           <div className="row">

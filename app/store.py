@@ -380,12 +380,6 @@ def company_scenario(company: str) -> str:
     return row["scenario"] if row else default_pack()
 
 
-def company_has_candidates(company: str) -> bool:
-    """초대한 지원자가 한 명이라도 있으면 True(시나리오 변경 잠금 기준)."""
-    with connect() as conn:
-        return conn.execute("SELECT 1 FROM sessions WHERE company = ? LIMIT 1", (company,)).fetchone() is not None
-
-
 def set_company_scenario(company: str, scenario: str) -> None:
     with connect() as conn:
         conn.execute("INSERT INTO company_settings (company, scenario) VALUES (?, ?)"

@@ -39,21 +39,29 @@ def _sign(payload: str) -> str:
     return hmac.new(_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def signup(email: str, password: str, company: str) -> str:
+def signup(email: str, password: str, company: str, scenario: str = "") -> str:
     """관리자 가입 후 토큰을 반환한다.
 
     Raises:
-        AuthError: 입력이 비었거나, 이미 가입한 이메일이거나, 이미 등록된 회사 이름(한 회사 한 계정, F-01).
+        AuthError: 입력이 비었거나, 이미 가입한 이메일이거나, 이미 등록된 회사 이름(한 회사 한 계정, F-01),
+            또는 없는 시나리오.
+
+    시나리오는 가입할 때 한 번 정하고 바꾸지 않는다. 같은 회사 지원자는 모두 같은 조건(PRD 5.5).
     """
+    from app.settings import default_pack, pack_ids
     email, company = email.strip().lower(), " ".join(company.split())
     if not email or not company or len(password) < 8:
         raise AuthError("이메일·회사 이름을 입력하고 비밀번호는 8자 이상으로 해 주세요.")
+    scenario = scenario or default_pack()
+    if scenario not in pack_ids():
+        raise AuthError(f"없는 시나리오입니다: {scenario}")
     salt = secrets.token_hex(16)
     result = store.create_admin(email, company, salt, _hash(password, salt))
     if result == "email":
         raise AuthError("이미 가입한 이메일입니다.")
     if result == "company":
         raise AuthError("이미 등록된 회사 이름입니다. 같은 회사라면 기존 담당자 계정으로 로그인해 주세요.")
+    store.set_company_scenario(company, scenario)
     return issue_token(email, company)
 
 

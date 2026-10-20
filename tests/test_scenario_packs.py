@@ -43,24 +43,25 @@ def test_rag_searches_only_the_sessions_pack():
         pass
 
 
-def _signup(email: str, company: str) -> dict:
-    r = client.post("/api/auth/signup", json={"email": email, "password": "password123", "company": company})
+def _signup(email: str, company: str, scenario: str = "") -> dict:
+    r = client.post("/api/auth/signup", json={"email": email, "password": "password123",
+                                              "company": company, "scenario": scenario})
     return {"Authorization": f"Bearer {r.json()['token']}"}
 
 
-def test_scenario_is_fixed_per_company():
-    # PRD 5.5 "조건은 모두에게 같다": 한 기업의 지원자는 모두 같은 시나리오. 첫 초대 뒤에는 못 바꾼다.
-    H = _signup("lock@px.kr", "잠금HR")
-    assert client.get("/api/admin/scenario", headers=H).json()["current"]["id"] == "moarun"
-    assert client.put("/api/admin/scenario", json={"scenario": "없는팩"}, headers=H).status_code == 400
-    assert client.put("/api/admin/scenario", json={"scenario": "pixel"}, headers=H).status_code == 200
+def test_scenario_is_chosen_at_signup_and_fixed_per_company():
+    # PRD 5.5 "조건은 모두에게 같다": 시나리오는 가입할 때 정하고, 그 회사 지원자는 모두 같은 시나리오
+    assert [p["id"] for p in client.get("/api/scenarios").json()] == ["moarun", "pixel"]   # 로그인 전 목록
+    bad = client.post("/api/auth/signup", json={"email": "x@px.kr", "password": "password123",
+                                               "company": "없는팩HR", "scenario": "없는팩"})
+    assert bad.status_code == 400
+    H = _signup("lock@px.kr", "잠금HR", "pixel")
+    assert client.get("/api/admin/scenario", headers=H).json()["current"]["company"] == "픽셀게임즈"
     client.post("/api/admin/invites", json={"alias": "A", "scenario": "moarun"}, headers=H)   # 초대마다 고르는 값은 무시
     client.post("/api/admin/invites", json={"alias": "B"}, headers=H)
     assert {r["scenario"] for r in client.get("/api/admin/candidates", headers=H).json()} == {"pixel"}
-    state = client.get("/api/admin/scenario", headers=H).json()
-    assert state["locked"] and state["current"]["company"] == "픽셀게임즈"
-    assert client.put("/api/admin/scenario", json={"scenario": "moarun"}, headers=H).status_code == 409
-    # 다른 기업은 영향 없음(F-01)
+    assert client.put("/api/admin/scenario", json={"scenario": "moarun"}, headers=H).status_code == 405   # 바꾸는 API 없음
+    # 고르지 않으면 기본(공통 PRD) 시나리오, 다른 기업은 영향 없음(F-01)
     assert client.get("/api/admin/scenario", headers=_signup("other@px.kr", "다른HR")).json()["current"]["id"] == "moarun"
 
 
@@ -83,16 +84,13 @@ def test_candidate_doc_list_follows_session_pack():
 
 
 def test_admin_docs_follow_company_pack():
-    H = _signup("docs@px.kr", "문서목록HR")
-    client.put("/api/admin/scenario", json={"scenario": "pixel"}, headers=H)
+    H = _signup("docs@px.kr", "문서목록HR", "pixel")
     titles = {d["title"] for d in client.get("/api/admin/docs", headers=H).json()["docs"]}
     assert "유저 설문 요약" in titles and "사용자 인터뷰 요약" not in titles
 
 
 def test_invite_uses_company_scenario_and_poll_names():
-    H = _signup("g@px.kr", "픽셀HR")
-    assert [p["id"] for p in client.get("/api/admin/scenarios", headers=H).json()] == ["moarun", "pixel"]
-    client.put("/api/admin/scenario", json={"scenario": "pixel"}, headers=H)
+    H = _signup("g@px.kr", "픽셀HR", "pixel")
     token = client.post("/api/admin/invites", json={"alias": "유저A"},
                         headers=H).json()["invite_path"].rsplit("/", 1)[1]
     info = client.get(f"/api/invite/{token}").json()
