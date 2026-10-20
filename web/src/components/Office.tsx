@@ -11,6 +11,7 @@ type Poll = {
   messages: Msg[]; tasks: Task[]; my_parts: Record<string, string>;
   coworker_parts: Record<string, string>; docs: { id: string; title: string }[];
   part_titles: Record<string, string>; poll_interval_seconds: number; time_scale: number;
+  activity: { actor: string; label: string; node: string }[];
 };
 
 const SAVE_DELAY_MS = 1000; // 입력이 멈춘 뒤 자동 저장까지 기다리는 시간(UI 반응성용)
@@ -159,7 +160,13 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
           ) : (
             <Bubble key={m.id} m={m} />
           ))}
-          {busy && <div className="typing">{tab === "dm" ? "이도현" : "한서윤 팀장"}님이 입력 중…</div>}
+          {/* 진행 이벤트: 서버가 알려 주는 AI의 현재 작업(Graph 노드) */}
+          {state.activity.filter((a) => a.actor === (tab === "dm" ? "coworker" : "lead")).map((a) => (
+            <div key={a.actor} className="typing">{NAME[a.actor]}님이 {a.label}…</div>
+          ))}
+          {busy && !state.activity.some((a) => a.actor === (tab === "dm" ? "coworker" : "lead")) && (
+            <div className="typing">{tab === "dm" ? "이도현" : "한서윤 팀장"}님이 입력 중…</div>
+          )}
         </div>
         <div className="composer">
           <textarea rows={2} value={draft} onChange={(e) => setDraft(e.target.value)}
@@ -222,7 +229,10 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
           <div className="chat">
             {assistantLog.length === 0 && <div className="typing">질문, 요약, 초안 작성을 요청해 보세요.</div>}
             {assistantLog.map((m) => <Bubble key={m.id} m={m} />)}
-            {asking && <div className="typing">답변 작성 중…</div>}
+            {state.activity.filter((a) => a.actor === "assistant").map((a) => (
+              <div key={a.actor} className="typing">AI 어시스턴트가 {a.label}…</div>
+            ))}
+            {asking && !state.activity.some((a) => a.actor === "assistant") && <div className="typing">답변 작성 중…</div>}
           </div>
           <div className="composer">
             <textarea rows={2} value={askDraft} onChange={(e) => setAskDraft(e.target.value)} placeholder="예: 지표 현황 요약해 줘" />
