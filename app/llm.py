@@ -13,14 +13,16 @@ import openai
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
-from app.settings import ROOT, config
+from app.settings import ROOT, config, db_path
 
 # override=True: 셸에 다른 OPENAI_API_KEY가 있어도 이 프로젝트 .env 값을 쓴다.
 load_dotenv(ROOT / ".env", override=True)
 
 RETRYABLE = (openai.RateLimitError, openai.InternalServerError,
              openai.APITimeoutError, openai.APIConnectionError)
-TRACE_PATH = ROOT / "data" / "trace.jsonl"
+def trace_path():
+    """호출 기록 파일. 지금 쓰는 DB 옆에 둔다(테스트는 임시 DB를 쓰므로 기록도 실제 로그와 섞이지 않는다)."""
+    return db_path().parent / "trace.jsonl"
 
 
 def chat_model(temperature: float) -> ChatOpenAI:
@@ -31,8 +33,9 @@ def chat_model(temperature: float) -> ChatOpenAI:
 
 def trace(record: dict) -> None:
     """호출·검증 기록을 data/trace.jsonl에 한 줄로 남긴다(Observability)."""
-    TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with TRACE_PATH.open("a", encoding="utf-8") as f:
+    path = trace_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
