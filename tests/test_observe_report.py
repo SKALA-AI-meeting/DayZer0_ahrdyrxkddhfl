@@ -341,6 +341,8 @@ def test_negated_quote_is_kept_for_human_review(monkeypatch):
     yes = CheckAnswer(check_id="kept_issue_in_plan", answer="yes", evidence_id="plan:3", quote="(확률형x) 저녁 시간대")
 
     async def fake(model, messages, node, sid_=""):   # 물어본 체크마다 답한다. kept_issue_in_plan은 계속 같은 오판
+        if node == "observe.nli":
+            return observe.Relation(relation="contradicts")
         ids = [line[2:].split(":")[0] for line in messages[1].content.splitlines() if line.startswith("- ")]
         return observe.Judgement(answers=[yes if i == "kept_issue_in_plan" else CheckAnswer(check_id=i, answer="no")
                                           for i in ids])
@@ -350,3 +352,30 @@ def test_negated_quote_is_kept_for_human_review(monkeypatch):
     assert kept["answer"] == "no" and r["negated"]
     section = report.build_body(sid, [r])["sections"][0]
     assert not section["observed"] and section["review"] == [{"when": "기획안 3번", "quote": "(확률형x) 저녁 시간대", "message_id": None}]
+
+
+# 부정 단어가 걸린 근거는 좁은 함의 검증으로 다시 본다: 뒷받침하면 살리고, 반대면 '판단이 필요한 원문'
+def test_negated_quote_rechecked_by_entailment(monkeypatch):
+    from app import settings
+    sid = store.create_session("x", scenario="pixel")
+    store.upsert_part(sid, "2", "확률형 아이템 대신 확정 재화를 주지만, 별도로 확률형 상자도 추가로 넣는다", 100)
+    store.upsert_part(sid, "3", "-> 복귀 이벤트 진행 (확률형x) 저녁 시간대 위주로 알림 발송", 100)
+    spec = [e for e in settings.observation_spec("pixel")["element"] if e["name"] == "존중·소통"][0]
+    quotes = {"plan:2": "별도로 확률형 상자도 추가로 넣는다", "plan:3": "(확률형x) 저녁 시간대"}
+    state = {"turn": 0}
+
+    async def fake(model, messages, node, sid_=""):
+        if node == "observe.nli":
+            return observe.Relation(relation="contradicts" if "확률형x" in messages[1].content else "supports")
+        state["turn"] += 1   # 첫 판별: plan:3(부정)을 근거로, 다시 물을 때: plan:2
+        eid = "plan:3" if state["turn"] == 1 else "plan:2"
+        ids = [line[2:].split(":")[0] for line in messages[1].content.splitlines() if line.startswith("- ")]
+        return observe.Judgement(answers=[
+            CheckAnswer(check_id=i, answer="yes", evidence_id=eid, quote=quotes[eid]) if i == "kept_issue_in_plan"
+            else CheckAnswer(check_id=i, answer="no") for i in ids])
+    monkeypatch.setattr(observe.llm, "ainvoke", fake)
+    r = asyncio.run(observe.observe_element(sid, spec, {"respect_review": 90}, use_cache=False))
+    kept = {c["check_id"]: c for c in r["checks"]}["kept_issue_in_plan"]
+    # "추가로 넣는다"는 '대신'이 있어도 함의 검증이 뒷받침으로 판정 → 근거로 살아남
+    assert kept["verified"] and kept["evidence_id"] == "plan:2"
+    assert [n["quote"] for n in r["negated"]] == ["(확률형x) 저녁 시간대"]

@@ -39,6 +39,10 @@ class Judgement(BaseModel):
     answers: list[CheckAnswer]
 
 
+class Relation(BaseModel):
+    relation: Literal["supports", "contradicts", "unrelated"]
+
+
 # ---------- 입력 만들기 ----------
 
 def _window_messages(session_id: str, start: float, end: float) -> list[dict]:
@@ -184,6 +188,41 @@ async def _judge(session_id: str, situation: str, checks: list[dict], transcript
     return answers, missing
 
 
+async def _entails(session_id: str, check: dict, quote: str, use_cache: bool) -> str:
+    """좁은 함의 검증: 원문 한 줄이 체크의 행동을 보여 주나(supports), 반대인가(contradicts), 무관한가(unrelated).
+
+    대화 전체를 보는 판별기와 달리 원문 한 줄과 행동 하나만 봐서 부정·제외 문맥을 정확히 읽는다.
+    임베딩 유사도는 주제만 재서 "확률형 대신"(0.598)과 "확률형 추가"(0.620)를 가르지 못했다.
+    """
+    human = f"확인할 행동: {check.get('point', '')} ({check['question']})\n원문: {quote}"
+    key = hashlib.sha256(json.dumps(["nli", config()["llm"]["model"], prompt("nli"), human],
+                                    ensure_ascii=False).encode()).hexdigest()
+    if use_cache and (cached := store.cache_get(key)) is not None:
+        return cached["relation"]
+    model = llm.chat_model(config()["llm"]["judge_temperature"]).with_structured_output(
+        Relation, method="function_calling")
+    out: Relation = await llm.ainvoke(model, [SystemMessage(prompt("nli")), HumanMessage(human)],
+                                      "observe.nli", session_id)
+    store.cache_put(key, {"relation": out.relation})
+    return out.relation
+
+
+async def _recheck_negated(session_id: str, checks: list[dict], spec_checks: list[dict], use_cache: bool) -> list[dict]:
+    """부정·제외 단어 때문에 뺀 근거를 함의 검증으로 다시 본다. 뒷받침하면 살리고, 아니면 뺀 채로 둔다."""
+    specs = {c["id"]: c for c in spec_checks}
+    out = []
+    for c in checks:
+        if c.get("dropped_reason") == NEGATED_REASON:
+            relation = await _entails(session_id, specs[c["check_id"]], c["quote"], use_cache)
+            llm.trace({"session": session_id, "node": "observe.nli", "check": c["check_id"], "relation": relation})
+            if relation == "supports":
+                c = {k: v for k, v in c.items() if k != "dropped_reason"} | {"answer": "yes", "verified": True}
+            else:
+                c = {**c, "nli": relation}
+        out.append(c)
+    return out
+
+
 def _mark_missing(checks: list[dict], missing: set[str]) -> list[dict]:
     """다시 물어도 답이 없던 체크에 이유를 남긴다(리포트에는 근거로 쓰이지 않고 내부 기록에만 남음)."""
     return [{**c, "dropped_reason": MISSING_REASON} if c["check_id"] in missing else c for c in checks]
@@ -230,7 +269,8 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     required = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
     forbidden = {c["id"]: c["quote_must_not_contain"] for c in spec["checks"] if c.get("quote_must_not_contain")}
     checks = _mark_missing(verify(answers, evidence, scopes, required, forbidden), missing)
-    # 부정·제외 표현 때문에 뺀 원문은 버리지 않고 '판단이 필요한 원문'으로 남긴다(해석은 담당자가, PRD 5.5)
+    checks = await _recheck_negated(session_id, checks, spec["checks"], use_cache)
+    # 함의 검증으로도 뒷받침되지 않은 부정·제외 원문은 버리지 않고 '판단이 필요한 원문'으로 남긴다(PRD 5.5)
     negated = [{"evidence_id": c["evidence_id"], "quote": c["quote"]} for c in checks
                if c.get("dropped_reason") == NEGATED_REASON]
     for _ in range(config()["observation"]["judge_dropped_retries"]):
@@ -246,7 +286,8 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
         again, still_missing = await _judge(session_id, spec["situation"], sub,
                                             _format(messages, plan, store.get_session(session_id)["scenario"]),
                                             retry_hint, use_cache)
-        redo = {c["check_id"]: c for c in _mark_missing(verify(again, evidence, scopes, required, forbidden), still_missing)}
+        redone = _mark_missing(verify(again, evidence, scopes, required, forbidden), still_missing)
+        redo = {c["check_id"]: c for c in await _recheck_negated(session_id, redone, spec["checks"], use_cache)}
         checks = [redo.get(c["check_id"], c) if c["check_id"] in dropped else c for c in checks]
         negated += [{"evidence_id": c["evidence_id"], "quote": c["quote"]} for c in redo.values()
                     if c.get("dropped_reason") == NEGATED_REASON]
