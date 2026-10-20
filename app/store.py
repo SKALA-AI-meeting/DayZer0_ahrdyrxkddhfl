@@ -46,6 +46,26 @@ CREATE TABLE IF NOT EXISTS tasks (
     status TEXT NOT NULL,              -- todo | doing | done
     PRIMARY KEY (session_id, part)
 );
+-- 관찰 기록: 요소별 판별 결과(내부용). business-mcp save_observation으로 저장한다.
+CREATE TABLE IF NOT EXISTS observations (
+    session_id TEXT NOT NULL,
+    element TEXT NOT NULL,
+    result TEXT NOT NULL,              -- JSON
+    PRIMARY KEY (session_id, element)
+);
+-- LLM 판별 캐시: 같은 입력이면 같은 결과(재현성).
+CREATE TABLE IF NOT EXISTS judge_cache (
+    cache_key TEXT PRIMARY KEY,
+    result TEXT NOT NULL
+);
+-- 리포트: 세션당 하나. state = generating | ready | failed
+CREATE TABLE IF NOT EXISTS reports (
+    session_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    body TEXT,                         -- JSON
+    error TEXT
+);
 -- 장면은 세션당 한 번만 실행. PRIMARY KEY가 중복 실행을 막는다(F-23).
 CREATE TABLE IF NOT EXISTS scene_runs (
     session_id TEXT NOT NULL,
@@ -192,3 +212,70 @@ def set_task_status(session_id: str, part: str, status: str) -> None:
     with connect() as conn:
         conn.execute("UPDATE tasks SET status = ? WHERE session_id = ? AND part = ?",
                      (status, session_id, part))
+
+
+def scene_run_minutes(session_id: str) -> dict[str, float]:
+    """장면 id → 실제 실행된 세션 시각(분)."""
+    with connect() as conn:
+        rows = conn.execute("SELECT scene_id, run_minute FROM scene_runs WHERE session_id = ?",
+                            (session_id,))
+        return {r["scene_id"]: r["run_minute"] for r in rows}
+
+
+def save_observation(session_id: str, element: str, result: dict) -> None:
+    """요소별 관찰 결과를 저장한다(덮어쓰기)."""
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO observations (session_id, element, result) VALUES (?, ?, ?)"
+            " ON CONFLICT(session_id, element) DO UPDATE SET result = excluded.result",
+            (session_id, element, json.dumps(result, ensure_ascii=False)))
+
+
+def list_observations(session_id: str) -> dict[str, dict]:
+    """요소 이름 → 관찰 결과."""
+    with connect() as conn:
+        rows = conn.execute("SELECT element, result FROM observations WHERE session_id = ?",
+                            (session_id,))
+        return {r["element"]: json.loads(r["result"]) for r in rows}
+
+
+def cache_get(key: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT result FROM judge_cache WHERE cache_key = ?", (key,)).fetchone()
+    return json.loads(row["result"]) if row else None
+
+
+def cache_put(key: str, result: dict) -> None:
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO judge_cache (cache_key, result) VALUES (?, ?)",
+                     (key, json.dumps(result, ensure_ascii=False)))
+
+
+def claim_report(session_id: str) -> bool:
+    """리포트 생성 권한을 얻는다. 처음 호출한 쪽만 True (중복 생성 방지)."""
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO reports (session_id, state) VALUES (?, 'generating')",
+            (session_id,))
+        return cur.rowcount == 1
+
+
+def update_report(session_id: str, **fields) -> None:
+    """리포트 상태·본문을 갱신한다. body는 dict로 넘기면 JSON으로 저장한다."""
+    if "body" in fields and fields["body"] is not None:
+        fields["body"] = json.dumps(fields["body"], ensure_ascii=False)
+    columns = ", ".join(f"{key} = ?" for key in fields)
+    with connect() as conn:
+        conn.execute(f"UPDATE reports SET {columns} WHERE session_id = ?",
+                     (*fields.values(), session_id))
+
+
+def get_report(session_id: str) -> dict | None:
+    """리포트 한 건. 없으면 None."""
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM reports WHERE session_id = ?", (session_id,)).fetchone()
+    if row is None:
+        return None
+    data = dict(row)
+    data["body"] = json.loads(data["body"]) if data["body"] else None
+    return data

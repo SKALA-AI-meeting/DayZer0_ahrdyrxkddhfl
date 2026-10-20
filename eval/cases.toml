@@ -1,0 +1,98 @@
+# 관찰 판별 평가셋. 지원자 메시지·기획안·어시스턴트 기록과 정답 라벨.
+# 장면은 events.toml의 시각에 실행된 것으로 넣는다. 동료·팀장 대사는 장면의 전달 내용을 그대로 쓴다(LLM 없음).
+# expected: 체크 id → true(그 행동이 있음) / false(없음). 사람이 정한 정답.
+# channel: team | dm | assistant(요청) | assistant_reply(어시스턴트 응답)
+
+# ---------------------------------------------------------------- 1. 잘한 사례
+[[case]]
+name = "잘한 사례"
+messages = [
+  { minute = 32, channel = "dm", text = "지금 1번 마무리 중이라 10분 뒤에 같이 볼게요. 사례는 '첫 참여 후 재방문 유도' 기준으로 골라 보면 어떨까요?" },
+  { minute = 52, channel = "team", text = "팀장님, 인터뷰 자료가 15분 늦게 와서 2번 파트가 조금 늦어질 것 같아요. 그동안 1번 문제 정의를 먼저 다듬어 둘게요." },
+  { minute = 72, channel = "team", text = "네, 대상을 3개월 넘게 안 나온 사용자로 바꿀게요. 1번 대상 정의를 다시 쓰고, 5번 지표도 바뀌어야 할 것 같은데 도현님과 다시 나눠 볼게요." },
+  { minute = 93, channel = "dm", text = "도현님, 3번의 유료 멤버십은 운영 정책상 올해 유료 기능을 내지 않기로 해서 어려울 것 같아요. 할인 대신 무료 리워드(배지)로 바꾸면 어떨까요?" },
+  { minute = 20, channel = "assistant", text = "지표 현황 문서에서 재참여율과 모임 규모별 차이를 요약해 줘. 첫 참여자 재참여를 높이는 기획에 쓸 거야." },
+  { minute = 20, channel = "assistant_reply", text = "재참여율은 22%이고, 5명 이하 모임은 31%, 11명 이상은 15%입니다. 참고: 지표 현황" },
+]
+plan = { "1" = "문제: 3개월 넘게 모임에 안 나온 사용자가 다시 돌아오지 않는다. 대상: 3개월 이상 미참여 사용자." }
+
+[case.expected."협력 태도"]
+helped = true
+scheduled = true
+declined = false
+[case.expected."책임감"]
+shared_delay = true
+proposed_alternative = true
+[case.expected."유연성"]
+asked_clarification = false
+rescoped = true
+reflected_in_plan = true
+[case.expected."존중·소통"]
+noticed_error = true
+cited_basis = true
+proposed_fix = true
+[case.expected."AI 활용"]
+delegation = true
+context_provided = true
+verified = false
+
+# ---------------------------------------------------------------- 2. 아쉬운 사례
+[[case]]
+name = "아쉬운 사례"
+messages = [
+  { minute = 40, channel = "dm", text = "제 것도 바빠서요. 사례는 도현님이 알아서 해 주세요." },
+  { minute = 75, channel = "team", text = "아 갑자기요? 그럼 지금까지 한 거 다 버려야 하잖아요." },
+  { minute = 95, channel = "dm", text = "이거 유료 멤버십 왜 넣으셨어요? 정책 문서 안 보셨어요?" },
+]
+plan = { "1" = "문제: 첫 모임 참여자의 22%만 두 번째 모임에 나온다. 대상: 첫 모임 참여자." }
+
+[case.expected."협력 태도"]
+helped = false
+scheduled = false
+declined = true
+[case.expected."책임감"]
+shared_delay = false
+proposed_alternative = false
+[case.expected."유연성"]
+asked_clarification = false
+rescoped = false
+reflected_in_plan = false
+[case.expected."존중·소통"]
+noticed_error = true
+cited_basis = true
+proposed_fix = false
+[case.expected."AI 활용"]
+delegation = false
+context_provided = false
+verified = false
+
+# ---------------------------------------------------------------- 3. 바꿔 말한 사례 (키워드를 피한 좋은 행동)
+[[case]]
+name = "바꿔 말한 사례"
+messages = [
+  { minute = 33, channel = "dm", text = "제 파트 정리하고 바로 연락드릴게요. 그 전에 하나만 말씀드리면, 재방문을 유도한 서비스 위주로 고르시면 될 것 같아요." },
+  { minute = 53, channel = "team", text = "팀장님, 2번 자료가 안 들어와서 순서를 바꿔 1번부터 정리할게요. 2번은 자료 오는 대로 바로 쓰겠습니다." },
+  { minute = 73, channel = "team", text = "알겠습니다. 오래 안 뛴 분들로 바뀌면 2번 근거도 다시 찾아야 해서, 도현님이랑 나눈 걸 다시 맞춰 볼게요. 혹시 바꾸게 된 배경을 조금 더 들을 수 있을까요?" },
+  { minute = 94, channel = "dm", text = "도현님, 3번 두 번째 아이디어는 이번 해 방침상 돈 받는 기능은 안 돼서, 무료 혜택으로 돌려 보면 어떨까요?" },
+]
+plan = { "1" = "문제: 오랫동안 모임에 나오지 않은 사용자가 돌아오지 않는다. 대상: 최근 석 달 동안 참여 기록이 없는 사용자." }
+
+[case.expected."협력 태도"]
+helped = true
+scheduled = true
+declined = false
+[case.expected."책임감"]
+shared_delay = true
+proposed_alternative = true
+[case.expected."유연성"]
+asked_clarification = true
+rescoped = true
+reflected_in_plan = true
+[case.expected."존중·소통"]
+noticed_error = true
+cited_basis = true
+proposed_fix = true
+[case.expected."AI 활용"]
+delegation = false
+context_provided = false
+verified = false

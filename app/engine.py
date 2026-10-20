@@ -2,10 +2,11 @@
 
 화면(또는 CLI)이 주기적으로 tick()을 부르면 그때 밀린 장면을 실행한다. 별도 스케줄러는 없다.
 """
+import asyncio
 import logging
 import time
 
-from app import assistant, clock, graph, guard, settings, store
+from app import assistant, clock, graph, guard, report, settings, store
 
 log = logging.getLogger("dayzero.engine")
 
@@ -77,7 +78,23 @@ def save_part(session_id: str, part: str, content: str) -> None:
     store.upsert_part(session_id, part, content, clock.minute_of(s["sim_seconds"]))
 
 
+_report_tasks: set[asyncio.Task] = set()   # 백그라운드 리포트 작업 참조 보관(가비지 수집 방지)
+
+
 def finish(session_id: str) -> str:
-    """세션을 끝낸다(제출 또는 시간 종료, F-17). 리포트 생성은 관찰 단계에서 연결한다."""
-    store.update_session(session_id, status="completed", phase="done")
+    """세션을 끝내고(제출 또는 시간 종료, F-17) 리포트 생성을 백그라운드로 시작한다(F-32).
+
+    실행 중인 이벤트 루프 안에서 불러야 한다.
+    """
+    if store.get_session(session_id)["status"] == "in_progress":
+        store.update_session(session_id, status="completed", phase="done")
+        task = asyncio.get_running_loop().create_task(report.generate_with_retry(session_id))
+        _report_tasks.add(task)
+        task.add_done_callback(_report_tasks.discard)
     return "completed"
+
+
+async def wait_reports() -> None:
+    """진행 중인 리포트 작업이 끝날 때까지 기다린다(CLI·테스트용)."""
+    if _report_tasks:
+        await asyncio.gather(*_report_tasks, return_exceptions=True)

@@ -63,10 +63,11 @@ include_plan_document = true
 [ai_use]
 name = "AI 활용"
 situation = "세션 전체"
+# evidence_scope: 근거로 인정할 원문 범위. messages = 지원자 메시지(요청)만, all = 메시지 + 기획안
 checks = [
-  { id = "delegation", question = "지원자가 AI 어시스턴트에 일을 맡겼는가? (yes라면 behavior에 맡긴 일을 한 문장으로 요약)" },
-  { id = "context_provided", question = "지원자의 요청에 과제 목표, 대상 사용자, 회사 정책 같은 조건이 담겨 있었는가?" },
-  { id = "verified", question = "지원자가 AI 결과를 회사 문서와 대조하거나 확인하는 행동을 했는가?" },
+  { id = "delegation", evidence_scope = "messages", question = "지원자가 AI 어시스턴트에 일을 맡겼는가? (yes라면 behavior에 맡긴 일을 한 문장으로 요약)" },
+  { id = "context_provided", evidence_scope = "messages", question = "지원자의 어시스턴트 요청 문장 안에 과제 목표, 대상 사용자, 회사 정책 같은 조건이 담겨 있었는가?" },
+  { id = "verified", evidence_scope = "all", question = "지원자가 AI 결과를 회사 문서와 대조하거나 확인하는 행동을 했는가?" },
 ]
 # F-31 "그대로 씀 / 고쳐 씀" 구분은 규칙(유사도)으로 한다. 기준값은 config.toml [observation].
 # F-33 어시스턴트 요청이 0건이면 LLM을 부르지 않고 "사용하지 않음"으로만 표시한다(규칙).

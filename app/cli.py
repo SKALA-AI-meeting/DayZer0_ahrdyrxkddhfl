@@ -46,6 +46,18 @@ async def main(script_path: Path) -> None:
         if store.get_session(sid)["status"] != "in_progress":
             break
         now += STEP_SECONDS / scale * scale   # 실제 간격은 STEP_SECONDS (배속은 tick이 적용)
+    print("\n리포트 생성 중...")
+    await engine.wait_reports()
+    rep = store.get_report(sid)
+    print(f"\n== 리포트 (상태: {rep['state'] if rep else '없음'}) ==")
+    for sec in (rep or {}).get("body", {}).get("sections", []) if rep and rep["body"] else []:
+        print(f"\n[{sec['element']}] 상황: {sec['situation']}")
+        for o in sec["observed"]:
+            print(f"  - {o['when']} {o['behavior']}\n      근거: \"{o['quote']}\"")
+        for q in sec.get("requests", []):
+            print(f"  · {q['when']} 요청: {q['request'][:40]}… → {q['reuse']}")
+        if sec.get("note"):
+            print(f"  ({sec['note']})")
     s = store.get_session(sid)
     print("\n== 결과 ==")
     print("상태:", s["status"], "/ 분업:", persona.assignment_text(s["assignment"]),

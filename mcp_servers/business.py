@@ -1,12 +1,14 @@
 """business-mcp: 세션·태스크 업무 데이터 MCP 서버 (직접 구축, stdio).
 
 - 조회 도구: get_session_status, list_tasks
-- 변경 도구: assign_tasks, update_task_status (destructiveHint로 표시)
-- 관찰 기록 저장 도구는 관찰 단계에서 추가한다.
+- 조회 도구: list_observations
+- 변경 도구: assign_tasks, update_task_status, save_observation (destructiveHint로 표시)
 
 PRD 부록은 gateway 내부 API를 거치지만, MVP는 같은 SQLite 파일을 직접 읽는다(README에 기록).
 실행: uv run python -m mcp_servers.business
 """
+import json
+
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
@@ -53,6 +55,25 @@ def update_task_status(session_id: str, part: str, status: str) -> dict:
     store.get_session(session_id)
     store.set_task_status(session_id, part, status)
     return {"ok": True, "part": part, "status": status}
+
+
+@mcp.tool(annotations=CHANGE)
+def save_observation(session_id: str, element: str, result_json: str) -> dict:
+    """요소별 관찰 결과(JSON 문자열)를 저장한다. 리포트 생성 과정에서 코드가 호출한다."""
+    store.get_session(session_id)
+    try:
+        result = json.loads(result_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"result_json이 올바른 JSON이 아닙니다: {exc}") from exc
+    store.save_observation(session_id, element, result)
+    return {"ok": True, "element": element}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def list_observations(session_id: str) -> dict:
+    """저장된 관찰 결과를 요소별로 반환한다."""
+    store.get_session(session_id)
+    return store.list_observations(session_id)
 
 
 if __name__ == "__main__":
