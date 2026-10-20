@@ -6,9 +6,9 @@ import { useEffect, useState } from "react";
 import Nav from "@/components/Nav";
 import { api, Msg } from "@/lib/api";
 
-type Observed = { behavior: string; quote: string; when: string };
+type Observed = { behavior: string; quote: string; when: string; source?: string; message_id?: number | null };
 type Section = {
-  element: string; situation: string; observed: Observed[]; note?: string;
+  element: string; situation: string; observed: Observed[]; note?: string; summary?: string;
   followups?: { id: number; when: string }[];
   requests?: { when: string; request: string; reuse: string }[];
 };
@@ -55,11 +55,19 @@ export default function ReportPage() {
             <div className="card" key={s.element}>
               <h2>{s.element}</h2>
               <p className="muted">상황: {s.situation}</p>
+              {s.summary && (
+                <div className="notice small" style={{ marginBottom: 10 }}>
+                  <b>근거 정리</b> <span className="muted">(AI가 아래 근거만 나란히 적은 것이며 판단이 아닙니다. 번호는 아래 근거 번호)</span>
+                  <div style={{ marginTop: 4 }}>{s.summary}</div>
+                </div>
+              )}
               {s.observed.map((o, i) => (
                 <div key={i} className="obs">
-                  <div><span className="time">{o.when}</span>{o.behavior}</div>
+                  <div><span className="muted small">[{i + 1}] </span><span className="time">{o.source === "대화" ? `${o.when} 대화` : o.when}</span>{o.behavior}</div>
                   <div className="quote">
-                    “{o.quote}” {o.when !== "기획안" && <a href="#" onClick={(e) => { e.preventDefault(); jump(o.quote); }}>대화에서 보기</a>}
+                    “{o.quote}”{" "}
+                    {o.message_id ? <a href="#" onClick={(e) => { e.preventDefault(); jumpTo(o.message_id!); }}>대화에서 보기</a>
+                      : !o.when.startsWith("기획안") && !o.source && <a href="#" onClick={(e) => { e.preventDefault(); jump(o.quote); }}>대화에서 보기</a>}
                   </div>
                 </div>
               ))}

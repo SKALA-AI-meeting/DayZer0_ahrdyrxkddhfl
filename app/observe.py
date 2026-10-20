@@ -80,28 +80,43 @@ def quote_found(quote: str, source: str, threshold: float) -> bool:
     return match.size / len(quote) >= threshold
 
 
+def _in_scope(scope: str, evidence_id: str) -> bool:
+    if scope == "messages":
+        return not evidence_id.startswith("plan:")
+    if scope == "plan":
+        return evidence_id.startswith("plan:")
+    return True
+
+
 def verify(answers: list[CheckAnswer], evidence: dict[str, str],
-           scopes: dict[str, str] | None = None) -> list[dict]:
-    """yes 답 중 인용이 원문에 없거나 허용 범위 밖이면 근거 없음으로 바꾼다.
+           scopes: dict[str, str] | None = None, required: dict[str, list[str]] | None = None) -> list[dict]:
+    """yes 답 중 근거로 인정할 수 없는 것을 근거 없음으로 바꾼다.
+
+    1) 인용이 원문에 없거나 허용 범위 밖이면 버린다(지어낸 인용).
+    2) 인용이 원문에 있어도 그 행동을 보여 주는 말(required)이 없으면 버린다(과장된 행동 문장).
 
     Args:
         answers: 판별기 답.
         evidence: 근거 id → 원문.
-        scopes: 체크 id → "messages"(지원자 메시지만) | "all". 없으면 all.
+        scopes: 체크 id → "messages"(지원자 메시지만) | "plan"(기획안만) | "all". 없으면 all.
+        required: 체크 id → 인용에 하나는 들어 있어야 하는 말 목록. 없으면 검사하지 않는다.
     """
     threshold = config()["observation"]["quote_match_threshold"]
-    scopes = scopes or {}
+    scopes, required = scopes or {}, required or {}
     out = []
     for a in answers:
         item = a.model_dump()
         item["verified"] = False
         if a.answer == "yes":
-            in_scope = not (scopes.get(a.check_id) == "messages" and a.evidence_id.startswith("plan:"))
+            in_scope = _in_scope(scopes.get(a.check_id, "all"), a.evidence_id)
             source = evidence.get(a.evidence_id, "") if in_scope else ""
-            if quote_found(a.quote, source, threshold):
-                item["verified"] = True
-            else:
+            words = required.get(a.check_id)
+            if not quote_found(a.quote, source, threshold):
                 item.update(answer="no", dropped_reason="인용이 원문에서 확인되지 않음")
+            elif words and not any(w in a.quote for w in words):
+                item.update(answer="no", dropped_reason="인용이 이 행동을 뒷받침하지 않음")
+            else:
+                item["verified"] = True
         out.append(item)
     return out
 
@@ -111,7 +126,8 @@ def verify(answers: list[CheckAnswer], evidence: dict[str, str],
 async def _judge(session_id: str, situation: str, checks: list[dict], transcript: str,
                  hint: str, use_cache: bool) -> list[CheckAnswer]:
     cfg = config()
-    scope_note = {"messages": " [근거는 지원자 메시지(id=m…)에서만. 기획안 인용 금지]"}
+    scope_note = {"messages": " [근거는 지원자 메시지(id=m…)에서만. 기획안 인용 금지]",
+                  "plan": " [근거는 지원자 기획안(id=plan:…)에서만]"}
     questions = "\n".join(f"- {c['id']}: {c['question']}{scope_note.get(c.get('evidence_scope'), '')}"
                           for c in checks)
     human = (f"상황: {situation}\n\n확인할 질문:\n{questions}\n\n{hint}\n\n기록:\n{transcript}\n\n"
@@ -165,7 +181,9 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     answers = await _judge(session_id, spec["situation"], spec["checks"],
                            _format(messages, plan, store.get_session(session_id)["scenario"]), hint, use_cache)
     evidence = _evidence_texts(messages, plan or {})
-    return {**base, "happened": True, "checks": verify(answers, evidence)}
+    scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
+    required = {c["id"]: c["quote_must_contain"] for c in spec["checks"] if c.get("quote_must_contain")}
+    return {**base, "happened": True, "checks": verify(answers, evidence, scopes, required)}
 
 
 # ---------- AI 활용 ----------
@@ -243,7 +261,7 @@ def cross_checked_docs(session_id: str, log: list[dict]) -> list[dict]:
                 seen.add(doc_id)
                 out.append({"check_id": "verified_doc_view", "answer": "yes", "verified": True,
                             "evidence_id": f"view:{hit['minute']}", "quote": f"'{title}' 문서 열람",
-                            "behavior": f"AI 어시스턴트가 근거로 든 '{title}' 문서를 직접 열어 확인함"})
+                            "behavior": f"지원자가 AI 어시스턴트 답의 근거 문서 '{title}'을(를) 직접 열어 확인함"})
     return out
 
 

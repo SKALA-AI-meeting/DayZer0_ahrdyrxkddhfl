@@ -128,3 +128,76 @@ def test_doc_view_after_assistant_citation_counts_as_verification():
     body = report.build_body(sid, [{"element": "AI 활용", "situation": "세션 전체", "used": True,
                                     "requests": [], "checks": checks}])
     assert body["sections"][0]["observed"][0]["when"] == "00:21"
+
+
+# 과장된 행동 문장: 인용은 원문에 있지만 그 행동을 보여 주지 않으면 버린다(실제 세션에서 하소연이 '확인 질문'으로 기록됨)
+def test_verify_drops_quote_that_does_not_support_behavior():
+    evidence = {"m1": "대상 유저가 완전히 바뀌어서 처음부터 다시 검토해야 할 것 같습니다 ㅠㅠ",
+                "plan:2": "신규/복귀유저 보상에 확률형 아이템 대신 확정 지급 재화. 여기에 확률형 아이템 뽑기를 추가로."}
+    answers = [CheckAnswer(check_id="asked_clarification", answer="yes", evidence_id="m1",
+                           quote="처음부터 다시 검토해야 할 것 같습니다", behavior="범위를 확인하는 질문"),
+               CheckAnswer(check_id="cited_basis", answer="yes", evidence_id="plan:2",
+                           quote="확률형 아이템 대신 확정 지급 재화", behavior="운영 정책을 근거로 제시"),
+               CheckAnswer(check_id="kept_issue_in_plan", answer="yes", evidence_id="plan:2",
+                           quote="여기에 확률형 아이템 뽑기를 추가로", behavior="기획안에 확률형 뽑기를 넣음"),
+               CheckAnswer(check_id="endorsed_issue", answer="yes", evidence_id="plan:2",
+                           quote="여기에 확률형 아이템 뽑기를 추가로", behavior="동의")]   # 대화 체크인데 기획안 인용
+    out = {a["check_id"]: a for a in observe.verify(
+        answers, evidence,
+        scopes={"endorsed_issue": "messages", "kept_issue_in_plan": "plan"},
+        required={"asked_clarification": ["?", "까요", "나요"], "cited_basis": ["정책", "금지"], "kept_issue_in_plan": ["확률형"]})}
+    assert out["asked_clarification"]["dropped_reason"] == "인용이 이 행동을 뒷받침하지 않음"
+    assert out["cited_basis"]["dropped_reason"] == "인용이 이 행동을 뒷받침하지 않음"
+    assert out["kept_issue_in_plan"]["verified"]
+    assert out["endorsed_issue"]["answer"] == "no"
+
+
+def test_report_labels_plan_part_and_merges_same_quote():
+    sid = store.create_session("x")
+    mid = store.add_message(sid, "dm", "candidate", "전설 상자 지급 좋은 듯합니다", 115)
+    q = "확률형 아이템 대신 확정 지급 재화"
+    checks = [{"check_id": "noticed_error", "answer": "yes", "verified": True, "evidence_id": "plan:2", "quote": q, "behavior": "기획안에서 바꿈"},
+              {"check_id": "proposed_fix", "answer": "yes", "verified": True, "evidence_id": "plan:2", "quote": q, "behavior": "대안 반영"},
+              {"check_id": "endorsed_issue", "answer": "yes", "verified": True, "evidence_id": f"m{mid}",
+               "quote": "전설 상자 지급 좋은 듯합니다", "behavior": "동료 제안에 동의함"}]
+    obs = report.build_body(sid, [{"element": "존중·소통", "situation": "s", "happened": True, "checks": checks}])["sections"][0]["observed"]
+    assert len(obs) == 2
+    assert obs[0]["when"] == "기획안 2번" and obs[0]["behavior"] == "기획안에서 바꿈 / 대안 반영" and obs[0]["message_id"] is None
+    assert obs[1]["when"] == "01:55" and obs[1]["message_id"] == mid
+
+
+def _section():
+    return {"element": "존중·소통", "situation": "s", "observed": [
+        {"behavior": "기획안에서 확정 지급으로 바꿈", "quote": "확률형 아이템 대신 확정 지급 재화", "when": "기획안 2번", "source": "기획안"},
+        {"behavior": "동료 제안에 동의함", "quote": "전설 장비 상자 지급 둘 다 좋은 듯합니다", "when": "01:55", "source": "대화"}]}
+
+
+# 요약 검증: 판단 없이 근거 번호·원문 그대로 인용만 통과한다
+def test_summary_check_accepts_side_by_side_facts():
+    ok = ('지원자는 기획안 2번에 "확률형 아이템 대신 확정 지급 재화"라고 적었다[1]. '
+          '01:55 대화에서는 "전설 장비 상자 지급 둘 다 좋은 듯합니다"라고 답했다[2].')
+    assert report.check_summary(ok, _section()) == "ok"
+
+
+def test_summary_check_rejects_judgement_missing_ref_and_made_up_quote():
+    s = _section()
+    assert report.check_summary("기획안과 대화가 모순된다[1][2].", s) == "evaluative:모순"
+    assert report.check_summary("기획안 2번에 확정 지급을 적었다. 대화에서는 동의했다[2].", s) == "no_ref"
+    assert report.check_summary("기획안 2번에 확정 지급을 적었다[3].", s) == "bad_ref"
+    assert report.check_summary('대화에서 "확률형은 꼭 넣어야 해요"라고 했다[2].', s).startswith("unquoted:")
+
+
+def test_summary_skipped_when_single_evidence(monkeypatch):
+    called = []
+    monkeypatch.setattr(report.llm, "ainvoke", lambda *a, **k: called.append(1))
+    one = {**_section(), "observed": _section()["observed"][:1]}
+    assert asyncio.run(report.summarize_section("x", one)) is None and not called
+
+
+def test_summary_hidden_when_verification_keeps_failing(monkeypatch):
+    class Out:
+        content = "지원자는 소통 역량이 부족하다[1]."
+    async def fake(*a, **k):
+        return Out()
+    monkeypatch.setattr(report.llm, "ainvoke", fake)
+    assert asyncio.run(report.summarize_section("x", _section())) is None

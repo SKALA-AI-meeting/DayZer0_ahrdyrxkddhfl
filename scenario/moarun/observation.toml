@@ -8,6 +8,11 @@
 # - candidate_keywords: 관련 메시지 "후보"를 넓게 찾는 용도. 키워드만으로 확정하지 않는다.
 #   후보가 0개여도 LLM은 구간 전체 메시지를 본다(키워드 누락 대비).
 # - checks: LLM이 예/아니오 + 원문 인용으로 답한다. 인용은 코드가 실제 메시지와 대조해 검증한다.
+#   evidence_scope = "messages": 대화로만 할 수 있는 행동(알림·질문·제안)은 지원자 메시지에서만 근거를 인정한다.
+#   evidence_scope = "plan": 기획안에 적힌 내용만 근거로 인정한다.
+#   quote_must_contain: 인용에 이 말 중 하나가 있어야 그 행동의 근거로 인정한다(코드 검증).
+#   인용은 원문에 있지만 행동을 뒷받침하지 않는 경우(예: 하소연을 '확인 질문'으로 기록)를 막는다.
+#   목록이 넓으면 과장된 행동 문장이 통과하고, 좁으면 맞는 근거도 버려진다.
 # - 결과는 내부용이며, 리포트에는 "관찰된 행동 + 근거 원문"만 보인다(개수·점수 표시 없음).
 
 [[element]]
@@ -29,7 +34,7 @@ situation = "담당 파트에 필요한 인터뷰 자료 지연"
 window_end_minute = 110
 candidate_keywords = ["지연", "늦", "밀리", "밀릴", "아직", "못 받", "안 와", "늦어", "먼저", "대신", "그동안"]
 checks = [
-  { id = "shared_delay", question = "지원자가 마감 전에 팀장이나 동료에게 자료 지연이나 그로 인한 일정 영향을 먼저 알렸는가?" },
+  { id = "shared_delay", evidence_scope = "messages", question = "지원자가 마감 전에 팀장이나 동료에게 자료 지연이나 그로 인한 일정 영향을 먼저 알렸는가?" },
   { id = "proposed_alternative", question = "지원자가 대안(먼저 할 수 있는 부분부터 진행, 순서 변경 등)을 내거나 실행했는가?" },
 ]
 
@@ -40,9 +45,9 @@ situation = "막판 요구사항 변경 (대상: 3개월 넘게 모임에 안 �
 window_end_minute = 120
 candidate_keywords = ["3개월", "3달", "석 달", "휴면", "안 나온", "미참여", "이탈", "대상", "범위", "분담", "일정"]
 checks = [
-  { id = "asked_clarification", question = "지원자가 바뀐 방향의 배경이나 범위를 확인하는 질문을 했는가?" },
-  { id = "rescoped", question = "지원자가 범위·분담·일정을 다시 정하자고 제안했는가?" },
-  { id = "reflected_in_plan", question = "지원자가 바뀐 대상(3개월 넘게 모임에 안 나온 사용자)을 기획안에 반영했는가?" },
+  { id = "asked_clarification", evidence_scope = "messages", quote_must_contain = ["?", "까요", "나요", "는지", "인가요", "건가요", "을까", "ㄹ까"], question = "지원자가 바뀐 방향의 배경이나 범위를 확인하는 질문을 했는가?" },
+  { id = "rescoped", evidence_scope = "messages", quote_must_contain = ["분담", "범위", "일정", "나눠", "나누", "나눈", "맡", "맞춰", "조정", "순서"], question = "지원자가 범위·분담·일정을 다시 정하자고 제안했는가?" },
+  { id = "reflected_in_plan", quote_must_contain = ["3개월", "3달", "석 달", "세 달", "휴면", "미참여", "안 나온", "오래"], question = "지원자가 바뀐 대상(3개월 넘게 모임에 안 나온 사용자)을 기획안에 반영했는가?" },
 ]
 # reflected_in_plan은 메시지뿐 아니라 기획안 최종본도 함께 본다.
 include_plan_document = true
@@ -55,10 +60,13 @@ window_end_minute = 120
 candidate_keywords = ["정책", "유료", "멤버십", "할인", "결제", "과금", "올해"]
 checks = [
   { id = "noticed_error", question = "지원자가 동료 파트의 유료 멤버십이 문제라는 점을 동료에게 알렸거나, 기획안에서 그 부분을 고쳤는가?" },
-  { id = "cited_basis", question = "지원자가 그 근거(운영 정책: 올해 유료 기능 없음)를 함께 제시했는가?" },
+  { id = "cited_basis", quote_must_contain = ["정책", "규정", "금지", "안 된", "안 돼", "못 넣", "불가", "없기로", "출시하지 않"], question = "지원자가 그 근거(운영 정책: 올해 유료 기능 없음)를 함께 제시했는가?" },
   { id = "proposed_fix", question = "지원자가 문제를 지적하는 데 그치지 않고 대안이나 수정 방향을 제안하거나 기획안에 반영했는가?" },
+  { id = "endorsed_issue", evidence_scope = "messages", question = "지원자가 대화에서 동료 파트의 유료 멤버십에 동의하거나 좋다고 하는 말을 했는가?" },
+  { id = "kept_issue_in_plan", evidence_scope = "plan", quote_must_contain = ["유료"], question = "지원자의 기획안에 정책과 어긋나는 내용(유료 멤버십처럼 유료 보상·기능을 넣는 내용)이 들어 있는가? 그런 내용을 빼거나 대신한다는 문장은 해당하지 않는다." },
 ]
 # 말없이 기획안만 고치는 경우도 "알아챔"으로 보기 위해 기획안 최종본도 함께 본다.
+# endorsed_issue·kept_issue_in_plan은 반대 방향 행동을 사실로만 기록한다(대화와 기획안이 다를 때 담당자가 함께 보게).
 include_plan_document = true
 
 # AI 활용: 이벤트 없이 세션 전체를 본다 (PRD 5.3).

@@ -31,6 +31,8 @@ reflected_in_plan = true
 noticed_error = true
 cited_basis = true
 proposed_fix = true
+endorsed_issue = false
+kept_issue_in_plan = false
 [case.expected."AI 활용"]
 delegation = true
 context_provided = true
@@ -61,6 +63,8 @@ reflected_in_plan = false
 noticed_error = true
 cited_basis = true
 proposed_fix = false
+endorsed_issue = false
+kept_issue_in_plan = false
 [case.expected."AI 활용"]
 delegation = false
 context_provided = false
@@ -92,6 +96,41 @@ reflected_in_plan = true
 noticed_error = true
 cited_basis = true
 proposed_fix = true
+endorsed_issue = false
+kept_issue_in_plan = false
+[case.expected."AI 활용"]
+delegation = false
+context_provided = false
+verified = false
+
+# ---------------------------------------------------------------- 4. 맞장구 사례 (실제 세션에서 놓쳤던 반대 방향 행동)
+# 정책과 어긋나는 동료 아이디어에 동의하고 기획안에도 넣었다. 하소연은 "확인 질문"이 아니다.
+[[case]]
+name = "맞장구 사례"
+messages = [
+  { minute = 35, channel = "dm", text = "네 그럼요!" },
+  { minute = 83, channel = "dm", text = "대상이 완전히 바뀌어서 처음부터 다시 검토해야 할 것 같습니다 ㅠㅠ" },
+  { minute = 115, channel = "dm", text = "확인했습니다! 재참여 리마인드랑 재참여 멤버십 둘 다 좋은 아이디어네요!" },
+]
+plan = { "3" = "재참여 리마인드 알림을 보낸다. 두 번째 모임 참여자에게 할인 가격의 유료 멤버십(월 구독)도 연다." }
+
+[case.expected."협력 태도"]
+helped = true
+scheduled = false
+declined = false
+[case.expected."책임감"]
+shared_delay = false
+proposed_alternative = false
+[case.expected."유연성"]
+asked_clarification = false
+rescoped = false
+reflected_in_plan = false
+[case.expected."존중·소통"]
+noticed_error = false
+cited_basis = false
+proposed_fix = false
+endorsed_issue = true
+kept_issue_in_plan = true
 [case.expected."AI 활용"]
 delegation = false
 context_provided = false
