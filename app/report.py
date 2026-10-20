@@ -81,6 +81,11 @@ async def resume_stale() -> list[str]:
         log.warning("중단된 리포트 다시 생성: session=%s", sid)
         await _run(sid)
         done.append(sid)
+    # 세션은 끝났는데 리포트 작업이 시작되기 전에 멈춘 경우(F-32)
+    for sid in store.completed_without_report():
+        log.warning("시작되지 않은 리포트 생성: session=%s", sid)
+        await generate_with_retry(sid)
+        done.append(sid)
     return done
 
 

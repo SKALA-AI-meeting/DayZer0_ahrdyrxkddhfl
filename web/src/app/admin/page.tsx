@@ -50,6 +50,16 @@ export default function AdminHome() {
     return () => clearInterval(t);
   }, [load]);
 
+  async function retry(id: string) {
+    setError("");
+    try {
+      await api(`/admin/reports/${id}/retry`, { method: "POST" }, true);
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function invite(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -111,8 +121,9 @@ export default function AdminHome() {
                   <td><span className={`badge ${r.status}`}>{STATUS_LABEL[r.status] ?? r.status}</span></td>
                   <td style={{ textAlign: "right" }}>
                     {r.status === "report_ready" ? <Link className="btn" href={`/admin/report/${r.id}`}>리포트 보기</Link>
+                      : r.status === "failed" ? <button className="secondary" onClick={() => retry(r.id)}>리포트 다시 만들기</button>
                       : ["invited", "in_progress"].includes(r.status) ? <CopyButton text={origin + r.invite_path} />
-                      : <span className="muted small">리포트 생성 중</span>}
+                      : <span className="muted small">리포트 생성 중…</span>}
                   </td>
                 </tr>
               ))}

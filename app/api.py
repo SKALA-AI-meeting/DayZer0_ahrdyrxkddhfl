@@ -145,6 +145,16 @@ def get_report(sid: str, admin: dict = Depends(_admin)) -> dict:
             "messages": [_msg(m) for m in store.list_messages(sid)]}
 
 
+@app.post("/api/admin/reports/{sid}/retry")
+async def retry_report(sid: str, admin: dict = Depends(_admin)) -> dict:
+    """자동 재시도(F-34) 끝에 '실패'가 된 리포트를 관리자가 다시 만들게 한다(원인 해결 뒤 수동 재시도)."""
+    _own_session(sid, admin)
+    if not store.reset_failed_report(sid):
+        raise HTTPException(409, "실패 상태인 리포트만 다시 만들 수 있습니다.")
+    engine.schedule_report(sid)
+    return {"ok": True}
+
+
 # ---------- 지원자 ----------
 
 class MessageIn(BaseModel):

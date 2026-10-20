@@ -94,10 +94,15 @@ def finish(session_id: str) -> str:
     """
     if store.get_session(session_id)["status"] == "in_progress":
         store.update_session(session_id, status="completed", phase="done")
-        task = asyncio.get_running_loop().create_task(report.generate_with_retry(session_id))
-        _report_tasks.add(task)
-        task.add_done_callback(_report_tasks.discard)
+        schedule_report(session_id)
     return "completed"
+
+
+def schedule_report(session_id: str) -> None:
+    """리포트 생성을 백그라운드 작업으로 시작한다(실행 중인 이벤트 루프 안에서 부른다)."""
+    task = asyncio.get_running_loop().create_task(report.generate_with_retry(session_id))
+    _report_tasks.add(task)
+    task.add_done_callback(_report_tasks.discard)
 
 
 async def wait_reports() -> None:

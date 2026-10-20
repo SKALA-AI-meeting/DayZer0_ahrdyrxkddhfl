@@ -475,3 +475,21 @@ def put_query_embedding(query_hash: str, embedding: list[float]) -> None:
     with connect() as conn:
         conn.execute("INSERT OR REPLACE INTO query_embeddings (query_hash, embedding) VALUES (?, ?)",
                      (query_hash, json.dumps(embedding)))
+
+
+def reset_failed_report(session_id: str) -> bool:
+    """실패한 리포트를 지우고 세션을 '완료'로 되돌린다(관리자 재생성용). 실패 상태일 때만 True."""
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM reports WHERE session_id = ? AND state = 'failed'", (session_id,))
+        if cur.rowcount != 1:
+            return False
+        conn.execute("UPDATE sessions SET status = 'completed' WHERE id = ?", (session_id,))
+        return True
+
+
+def completed_without_report() -> list[str]:
+    """끝났는데(완료) 리포트 행이 없는 세션 id."""
+    with connect() as conn:
+        rows = conn.execute("SELECT id FROM sessions WHERE status = 'completed' AND id NOT IN"
+                            " (SELECT session_id FROM reports)")
+        return [r["id"] for r in rows]

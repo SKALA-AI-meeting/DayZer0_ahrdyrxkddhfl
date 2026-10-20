@@ -102,3 +102,16 @@ def test_lead_does_not_see_dm(monkeypatch):
     store.add_message(sid, "team", "candidate", "팀 채널 메시지", 6)
     asyncio.run(persona.speak("lead", sid, 7, "답하라", ("team", "dm", "system")))
     assert "팀 채널 메시지" in seen["human"] and "비밀 1:1 메시지" not in seen["human"]
+
+
+# 세션은 끝났는데(완료) 리포트 작업이 시작되기 전에 서버가 멈춘 경우도 재시작 때 만든다(F-32)
+def test_completed_session_without_report_is_generated_on_startup(monkeypatch):
+    sid = store.create_session("x")
+    store.update_session(sid, status="completed")
+
+    async def ok(_sid):
+        return {"sections": []}
+    monkeypatch.setattr(report, "generate", ok)
+    asyncio.run(report.resume_stale())
+    assert store.get_report(sid)["state"] == "ready"
+    assert store.get_session(sid)["status"] == "report_ready"
