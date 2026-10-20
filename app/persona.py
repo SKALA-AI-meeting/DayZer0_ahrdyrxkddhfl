@@ -110,6 +110,7 @@ async def speak(role: str, session_id: str, minute: float, task: str,
     pack = session["scenario"]
     system = (f"{prompt(role, pack)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
               f"- 현재 분담: {assignment_text(session['assignment'], pack)}\n"
+              f"- 마감: {clock.deadline_text(minute, pack)}\n"
               f"- 지금 볼 수 있는 회사 문서: {docs_text(minute, session['company'], pack)} (이 목록에 없는 문서는 아직 볼 수 없다)")
     if role == "coworker":   # 대화가 요약돼도 누구의 아이디어인지 잃지 않게 동료 자신의 공유분을 밝혀 둔다
         mine = {k.split(":")[1]: v for k, v in store.get_parts(session_id).items() if k.startswith("coworker:")}

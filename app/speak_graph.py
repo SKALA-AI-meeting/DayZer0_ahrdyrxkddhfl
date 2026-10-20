@@ -23,7 +23,7 @@ from typing import TypedDict
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from app import docs, guard, llm, progress
+from app import clock, docs, guard, llm, progress
 from app.mcp_client import doc_tool_specs, doc_tools
 from app.settings import config
 
@@ -150,6 +150,8 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
     for options in must_include:
         if not any(o in text for o in options):
             return f"missing:{options[0]}"
+    if 0 < minute < float("inf") and any(p in text for p in config()["verify"]["stale_deadline_phrases"]):
+        return f"stale_time:{clock.deadline_text(minute, scenario or None)}"   # 킥오프의 "2시간 뒤"를 그대로 반복
     if use_tools and required_tool and required_tool not in (called_tools or []):
         return "not_read"   # 검토를 부탁받았는데 공유 문서를 실제로 읽지 않음
     if use_tools and tools_used == 0 and any(p in text for p in config()["verify"]["no_lookup_phrases"]):
@@ -192,6 +194,8 @@ FEEDBACK = {
     "no_lookup": "찾아보지 않고 답할 수 없다고 했다. 회사 문서를 먼저 검색해 보고, 찾은 내용으로 답하라. "
                  "찾아봐도 없으면 그때 없다고 말하라.",
     "deferral": "확인하겠다고만 하고 실제로 확인하지 않았다. 지금 도구를 호출해 확인한 뒤, 확인한 내용으로 바로 답하라.",
+    "stale_time": "세션 시작 때 말한 '2시간 뒤'를 지금도 그대로 말했다. 지금은 {x}이다. "
+                  "이 시각에 맞게 말하거나, 시간을 말할 필요가 없으면 빼고 다시 써라.",
     "citation": "방금 답에서 '{x}' 문서를 근거로 들었지만 이번에 그 문서를 읽지 않았다. "
                 "도구로 확인하거나, 확인하지 않은 문서는 언급하지 말고 다시 써라.",
 }

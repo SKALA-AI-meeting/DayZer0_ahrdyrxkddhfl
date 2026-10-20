@@ -92,3 +92,12 @@ def test_coworker_claiming_unshared_work_is_caught():
     assert sg.check(text, [], [], True, tools_used=0, unshared=True) == "unshared_claim"
     assert sg.check("지금 4번 사례를 찾는 중이에요.", [], [], True, tools_used=0, unshared=True) == "ok"
     assert sg.check(text, [], [], True, tools_used=0, unshared=False) == "ok"   # 공유 뒤에는 대상 아님
+
+
+# 회귀: 팀장이 01:10·01:50에도 킥오프의 "2시간 뒤"를 반복했다 → 코드가 잡고 지금 시각을 알려 다시 쓰게 한다
+def test_stale_deadline_is_rejected_after_kickoff():
+    assert sg.check("2시간 뒤 기획안을 받겠습니다", [["2시간"]], [], False, minute=0) == "ok"   # 킥오프는 정상
+    verdict = sg.check("마감은 그대로 2시간 뒤입니다", [], [], False, minute=70, scenario="pixel")
+    assert verdict == "stale_time:마감 01:50, 남은 시간 약 40분"
+    assert sg.check("마감은 그대로예요", [], [], False, minute=70, scenario="pixel") == "ok"
+    assert sg.check("2시간 뒤까지 제출해 주세요", [], [], False, minute=110).startswith("stale_time:마감 시각(01:50)이 됐다")

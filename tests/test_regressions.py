@@ -132,3 +132,14 @@ def test_completed_session_without_report_is_generated_on_startup(monkeypatch):
     asyncio.run(report.resume_stale())
     assert store.get_report(sid)["state"] == "ready"
     assert store.get_session(sid)["status"] == "report_ready"
+
+
+# 회귀: "다시 검토해야 할 것 같아요" 같은 하소연을 검토 요청으로 잡아 동료가 말에 답하지 않고 리뷰만 했다
+def test_review_request_needs_request_form():
+    from app import persona
+    assert not persona.is_review_request("대상 유저가 바뀌어서 처음부터 다시 검토해야 할 것 같습니다 ㅠㅠ")
+    assert not persona.is_review_request("피드백 반영해서 고쳐 볼게요")
+    assert not persona.is_review_request("2번 보완해서 다시 올릴게요")
+    assert persona.is_review_request("기획안 검토해 주실 수 있나요?")
+    assert persona.is_review_request("한번 봐주세요")
+    assert persona.is_review_request("리뷰 부탁드려요")

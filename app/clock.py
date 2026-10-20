@@ -5,7 +5,7 @@
 - 간격이 그보다 길면(창을 닫았다 돌아옴) 그 사이는 세지 않는다 → F-19 "남은 시간 그대로 이어짐".
 - time_scale 배속을 곱해 "세션 안 시간(sim_seconds)"으로 저장한다. 배속을 중간에 바꿔도 시각이 튀지 않는다.
 """
-from app.settings import SECONDS_PER_MINUTE
+from app.settings import SECONDS_PER_MINUTE, scene_by_id
 
 
 def advance(sim_seconds: float, last_seen: float | None, now: float,
@@ -52,3 +52,12 @@ def format_minute(minute: float) -> str:
     """세션 시각을 PRD 표기(HH:MM)로 바꾼다. 예: 65.0 → '01:05'."""
     total = int(minute)
     return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def deadline_text(minute: float, pack: str | None = None) -> str:
+    """마감 시각과 남은 시간 문장. 페르소나가 킥오프의 "2시간 뒤"를 그대로 반복하지 않게 맥락에 넣는다."""
+    deadline = scene_by_id("deadline_report", pack)["at_minute"]
+    left = round(deadline - minute)
+    if left <= 0:
+        return f"마감 시각({format_minute(deadline)})이 됐다. 남은 시간 없음"
+    return f"마감 {format_minute(deadline)}, 남은 시간 약 {left}분"
