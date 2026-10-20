@@ -1,14 +1,23 @@
 """세션 진행 엔진: 시계를 돌리고, 시각이 된 장면을 한 번씩 실행하고, 지원자 입력을 Graph로 넘긴다.
 
 화면(또는 CLI)이 주기적으로 tick()을 부르면 그때 밀린 장면을 실행한다. 별도 스케줄러는 없다.
+
+장면 실행 규칙(scenario/<팩>/events.toml):
+- skip_if_candidate_wrote: 기준 장면 뒤 지원자가 그 채널에 이미 썼으면 실행하지 않는다(팀장이 먼저 묻기 전에 연락했는가).
+- early_on_progress_check: 장면 시각 전이라도 지원자가 동료에게 진행 상황을 물으면 그때 실행한다.
+- early_after_consult: 지원자가 팀장 1:1에 정해진 횟수만큼 쓰면 팀장이 답한 직후 실행한다(상한 시각은 at_minute).
+업무는 직접 하지 않고 업무 메모 → 고정 지문 → 시계 넘기기로 진행한다(work_step, app/work.py).
 """
 import asyncio
 import logging
 import time
 
-from app import assistant, clock, docs, graph, guard, report, settings, store
+from app import clock, docs, graph, guard, llm, observe, persona, report, settings, store, work
+from app.mcp_client import call_business
 
 log = logging.getLogger("dayzero.engine")
+CANDIDATE_CHANNELS = ("team", "dm", "lead_dm")   # 지원자가 메시지를 보낼 수 있는 채널
+SKIPPED_PREFIX = "skipped:"   # 조건 때문에 실행하지 않은 장면 표시(리포트의 규칙 관찰이 읽는다)
 
 
 async def tick(session_id: str, now: float | None = None) -> dict:
@@ -32,6 +41,10 @@ async def tick(session_id: str, now: float | None = None) -> dict:
     for scene in clock.due_scenes(settings.scenes(s["scenario"]), minute, store.run_scene_ids(session_id)):
         if not store.claim_scene(session_id, scene["id"], minute):
             continue   # 다른 요청이 이미 실행 중 (F-23 중복 방지)
+        if should_skip(session_id, scene):
+            store.claim_scene(session_id, f"{SKIPPED_PREFIX}{scene['id']}", minute)
+            llm.trace({"session": session_id, "node": "engine.skip_scene", "scene": scene["id"]})
+            continue
         try:
             await graph.run_turn(session_id, minute, {"kind": "scene", "scene_id": scene["id"]})
         except Exception:
@@ -39,12 +52,30 @@ async def tick(session_id: str, now: float | None = None) -> dict:
             store.unclaim_scene(session_id, scene["id"])
             log.exception("장면 실행 실패: session=%s scene=%s", session_id, scene["id"])
             break
+        work.announce_effects(session_id, minute, s["scenario"])   # 예: 대상 변경 → 업무 진척 일부 무효 알림
 
     announce_shared_docs(session_id, minute)
     status = "in_progress"
     if minute >= cfg["duration_minutes"]:
         status = finish(session_id)
     return {"minute": minute, "remaining": max(0, cfg["duration_minutes"] - minute), "status": status}
+
+
+def should_skip(session_id: str, scene: dict) -> bool:
+    """skip_if_candidate_wrote 조건: 기준 장면 뒤 지원자가 지정 채널에 이미 썼으면 True.
+
+    팀 채널 글은 팀장을 향한 말만 센다(동료 이름을 부른 말은 팀장에게 연락한 것이 아니다, persona.team_responder).
+    """
+    cond = scene.get("skip_if_candidate_wrote")
+    if not cond:
+        return False
+    since = store.scene_run_minutes(session_id).get(cond["since_scene"])
+    if since is None:
+        return False
+    pack = store.get_session(session_id)["scenario"]
+    return any(m["sender"] == "candidate" and m["minute"] >= since
+               and (m["channel"] != "team" or persona.team_responder(m["content"], pack) == "lead")
+               for m in store.list_messages(session_id, channels=tuple(cond["channels"])))
 
 
 def announce_shared_docs(session_id: str, minute: float) -> None:
@@ -58,34 +89,52 @@ def announce_shared_docs(session_id: str, minute: float) -> None:
 
 
 async def send_message(session_id: str, channel: str, text: str, now: float | None = None) -> None:
-    """지원자가 팀 채널(team) 또는 동료 1:1(dm)에 메시지를 보낸다."""
-    if channel not in ("team", "dm"):
+    """지원자가 팀 채널(team), 동료 1:1(dm), 팀장 1:1(lead_dm)에 메시지를 보낸다."""
+    if channel not in CANDIDATE_CHANNELS:
         raise ValueError(f"보낼 수 없는 채널: {channel}")
     state = await tick(session_id, now)
     if state["status"] != "in_progress":
         raise RuntimeError("이미 끝난 세션입니다.")
     minute = state["minute"]
+    pack = store.get_session(session_id)["scenario"]
     store.add_message(session_id, channel, "candidate", text, minute)
+    role = persona.responder(channel, text, pack)
     if guard.is_evaluation_question(text):
-        role = "coworker" if channel == "dm" else "lead"
         store.add_message(session_id, channel, role, guard.notice(), minute)
         return
     if channel == "dm" and await start_split_early(session_id, text, minute):
+        return
+    if role == "coworker" and await reveal_early(session_id, text, minute):
         return
     try:
         await graph.run_turn(session_id, minute, {"kind": "candidate", "channel": channel, "text": text})
     except Exception:   # 재시도 후에도 실패: 500 대신 정해진 문장으로 답하고 원인은 로그에 남긴다(PRD A.4)
         log.exception("답장 생성 실패: session=%s channel=%s", session_id, channel)
-        role = "coworker" if channel == "dm" else "lead"
         store.add_message(session_id, channel, role,
                           settings.config()["verify"]["llm_failure_reply"], minute)
+    if channel == "lead_dm":
+        await run_after_consult(session_id, minute)
+
+
+async def _run_scene_now(session_id: str, scene_id: str, minute: float) -> bool:
+    """장면을 지금 실행한다. 이미 실행됐거나 실패하면 False(실패하면 원래 시각에 다시 실행되게 표시를 지운다)."""
+    if not store.claim_scene(session_id, scene_id, minute):
+        return False
+    try:
+        await graph.run_turn(session_id, minute, {"kind": "scene", "scene_id": scene_id})
+    except Exception:
+        store.unclaim_scene(session_id, scene_id)
+        log.exception("장면 앞당겨 실행 실패: session=%s scene=%s", session_id, scene_id)
+        return False
+    work.announce_effects(session_id, minute, store.get_session(session_id)["scenario"])
+    return True
 
 
 async def start_split_early(session_id: str, text: str, minute: float) -> bool:
     """분업 장면 전에 지원자가 먼저 분담을 꺼내면 분업 장면(F-21)을 지금 실행한다.
 
-    00:10은 "흐름용" 시점이라(F-23 이벤트 4개가 아님) 앞당겨도 PRD 내용(동료가 분담안 제안 → 수락·조정)은 같다.
-    장면 실행 기록을 남기므로 00:10에 같은 분담안을 다시 말하지 않고, 이후 답은 분업 단계로 처리된다.
+    분업 장면은 흐름용 시점이라 앞당겨도 내용(동료가 분담안 제안 → 수락·조정)은 같다.
+    장면 실행 기록을 남기므로 정해진 시각에 같은 분담안을 다시 말하지 않고, 이후 답은 분업 단계로 처리된다.
 
     Returns:
         분업 장면을 실행했으면 True.
@@ -94,31 +143,94 @@ async def start_split_early(session_id: str, text: str, minute: float) -> bool:
     phrases = settings.config()["negotiation"]["split_request_phrases"]
     if s["phase"] != "waiting" or not any(p in text for p in phrases):
         return False
-    if not store.claim_scene(session_id, "negotiate", minute):
-        return False   # 이미 실행됐거나 다른 요청이 실행 중
-    try:
-        await graph.run_turn(session_id, minute, {"kind": "scene", "scene_id": "negotiate"})
-    except Exception:   # 실패하면 실행 표시를 지워 00:10에 정상 실행되게 하고, 이번 메시지는 일반 답장으로 처리
-        store.unclaim_scene(session_id, "negotiate")
-        log.exception("분업 장면 앞당겨 실행 실패: session=%s", session_id)
+    return await _run_scene_now(session_id, observe.SPLIT_SCENE, minute)
+
+
+async def reveal_early(session_id: str, text: str, minute: float) -> bool:
+    """early_on_progress_check 장면 전에 지원자가 동료에게 진행 상황을 물으면 그 장면을 지금 실행한다.
+
+    중간 점검을 한 지원자는 동료의 지연을 일찍 알게 된다. 사건 내용은 같고 발견 시점만 지원자 행동에 따라 달라진다.
+
+    Returns:
+        장면을 실행했으면 True(그 장면 대사가 이번 메시지에 대한 답이 된다).
+    """
+    s = store.get_session(session_id)
+    if not observe.is_progress_question(text):
         return False
-    return True
+    # 분업 협상 중이어도 털어놓는다. 이벤트 장면이라 Graph가 먼저 지금 분담안으로 확정한다(finalize_split).
+    if s["phase"] not in ("negotiate", "work"):
+        return False
+    ran = store.run_scene_ids(session_id)
+    for scene in settings.scenes(s["scenario"]):
+        if scene.get("early_on_progress_check") and scene["id"] not in ran:
+            if await _run_scene_now(session_id, scene["id"], minute):
+                llm.trace({"session": session_id, "node": "engine.reveal_early", "scene": scene["id"]})
+                return True
+    return False
 
 
-async def ask_assistant(session_id: str, text: str, now: float | None = None) -> str:
-    """지원자가 AI 어시스턴트에 요청한다."""
+async def run_after_consult(session_id: str, minute: float) -> None:
+    """early_after_consult 장면: 기준 장면 뒤 지원자가 팀장 1:1에 정해진 횟수만큼 썼으면 지금 실행한다."""
+    s = store.get_session(session_id)
+    runs = store.scene_run_minutes(session_id)
+    turns = settings.config()["work"]["consult_turns_before_pivot"]
+    for scene in settings.scenes(s["scenario"]):
+        cond = scene.get("early_after_consult")
+        if not cond or scene["id"] in runs or cond["since_scene"] not in runs:
+            continue
+        since = runs[cond["since_scene"]]
+        sent = [m for m in store.list_messages(session_id, channels=("lead_dm",))
+                if m["sender"] == "candidate" and m["minute"] >= since]
+        if len(sent) >= turns:
+            await _run_scene_now(session_id, scene["id"], minute)
+
+
+def skip_target(session_id: str, minute: float, pack: str | None = None) -> float:
+    """'작업 계속하기'로 넘어갈 세션 시각(분). skip_minutes만큼 넘기되 다음 장면 시각과 세션 끝을 넘지 않는다."""
+    cfg = settings.config()
+    ran = store.run_scene_ids(session_id)
+    upcoming = [sc["at_minute"] for sc in settings.scenes(pack) if sc["id"] not in ran and sc["at_minute"] > minute]
+    return min([minute + cfg["work"]["skip_minutes"], cfg["session"]["duration_minutes"]] + upcoming[:1])
+
+
+async def work_step(session_id: str, memo: str, now: float | None = None) -> dict:
+    """업무 메모를 받아 분류하고, 고정 지문을 남긴 뒤 시계를 넘긴다.
+
+    Raises:
+        ValueError: 메모가 비었거나 너무 긺.
+        RuntimeError: 이미 끝난 세션.
+    """
+    now = time.time() if now is None else now
+    memo = memo.strip()
+    limit = settings.config()["work"]["memo_max_chars"]
+    if not memo:
+        raise ValueError("다음에 무엇을 할지 짧게 적어 주세요.")
+    if len(memo) > limit:
+        raise ValueError(f"업무 메모는 {limit}자 이내로 적어 주세요.")
     state = await tick(session_id, now)
     if state["status"] != "in_progress":
         raise RuntimeError("이미 끝난 세션입니다.")
-    return await assistant.ask(session_id, state["minute"], text)
+    minute, pack = state["minute"], store.get_session(session_id)["scenario"]
+    mid = store.add_message(session_id, "work", "candidate", memo, minute)
+    category, part = work.resolve(session_id, *await work.classify(session_id, memo, pack), pack)
+    advanced = work.can_advance(session_id, part, pack)   # 다 끝났거나 장면 영향으로 막히면 오르지 않음
+    store.add_work_memo(session_id, mid, category, part, advanced)
+    if part:   # 업무 카드 상태도 진척에 맞춘다(business-mcp 변경 도구)
+        done, need = work.progress(session_id, pack)[part], work.units(pack)[part]
+        await call_business("update_task_status", {"session_id": session_id, "part": part,
+                                                   "status": work.task_status(done, need)})
+    text = work.narration(session_id, category, part, advanced, pack)
+    store.add_message(session_id, "work", "narrator", f"[{work.label(category, pack)}] {text}", minute)
+    target = skip_target(session_id, minute, pack)
+    store.update_session(session_id, sim_seconds=target * settings.SECONDS_PER_MINUTE, last_seen=now)
+    llm.trace({"session": session_id, "node": "engine.work_step", "category": category, "part": part,
+               "advanced": advanced, "from": round(minute, 2), "to": round(target, 2)})
+    return await tick(session_id, now)
 
 
-def save_part(session_id: str, part: str, content: str) -> None:
-    """지원자가 기획안 파트를 저장한다(자동 저장, F-13). 동료 파트 키(coworker:*)는 쓸 수 없다."""
-    if part not in settings.PART_IDS:
-        raise ValueError(f"없는 파트: {part}")
-    s = store.get_session(session_id)
-    store.upsert_part(session_id, part, content, clock.minute_of(s["sim_seconds"]))
+def can_finish(session_id: str) -> bool:
+    """지원자가 '업무 마치기'를 누를 수 있는가: 보고 요청 장면(config [session].finish_after_scene)이 실행된 뒤."""
+    return settings.config()["session"]["finish_after_scene"] in store.run_scene_ids(session_id)
 
 
 _report_tasks: set[asyncio.Task] = set()   # 백그라운드 리포트 작업 참조 보관(가비지 수집 방지)

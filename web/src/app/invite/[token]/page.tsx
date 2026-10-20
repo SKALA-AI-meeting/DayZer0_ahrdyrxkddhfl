@@ -77,10 +77,10 @@ export default function InvitePage() {
         <div className="card">
           <h1>수고하셨습니다</h1>
           <p className="muted">세션이 끝났어요. 오늘 있었던 일을 설명해 드릴게요.</p>
-          <h2 style={{ marginTop: 16 }}>연출된 상황 4가지</h2>
+          <h2 style={{ marginTop: 16 }}>연출된 상황</h2>
           <p className="muted small">협업 행동을 관찰하기 위해 미리 정해 둔 상황이에요. 모든 지원자가 같은 시점에 같은 상황을 겪습니다.</p>
           <table><tbody>{debrief.events.map((e) => (
-            <tr key={e.time}><td style={{ width: 70 }}><span className="time">{e.time}</span></td><td>{e.message}</td></tr>
+            <tr key={e.time + e.message}><td style={{ width: 70 }}><span className="time">{e.time}</span></td><td>{e.message}</td></tr>
           ))}</tbody></table>
         </div>
         <div className="notice">{debrief.notice}</div>
@@ -92,13 +92,12 @@ export default function InvitePage() {
       <Shell>
         <div className="card">
           <h1>{info.pack.company} 팀에 오신 걸 환영해요</h1>
-          <p>오늘 당신은 <b>{info.pack.company}</b>({info.pack.company_desc})의 기획자로 합류합니다. <b>{info.pack.service}</b>({info.pack.service_desc})를 만드는 팀이에요.</p>
+          <p>오늘 당신은 <b>{info.pack.company}</b>({info.pack.company_desc})의 기획자로 합류합니다. <b>{info.pack.service}</b>({info.pack.service_desc})를 만드는 팀이에요. 동료와 둘이 프로젝트 하나를 맡게 됩니다.</p>
           <div className="stack" style={{ margin: "14px 0" }}>
-            <div className="row"><span className="avatar lead">{info.pack.lead_short}</span><div><b>{info.pack.lead_name} 팀장</b><div className="muted small">{info.pack.lead_role}. 팀 채널에서 과제를 공지해요.</div></div></div>
+            <div className="row"><span className="avatar lead">{info.pack.lead_short}</span><div><b>{info.pack.lead_name} 팀장</b><div className="muted small">{info.pack.lead_role}(AI). 팀 채널에서 미션을 주고, 1:1로 상담과 보고를 받아요.</div></div></div>
             <div className="row"><span className="avatar coworker">{info.pack.coworker_short}</span><div><b>{info.pack.coworker_name}</b><div className="muted small">{info.pack.coworker_role}(AI 동료). 1:1 메신저로 함께 일해요.</div></div></div>
-            <div className="row"><span className="avatar assistant">AI</span><div><b>AI 어시스턴트</b><div className="muted small">질문·요약·초안을 도와주는 업무 도구예요.</div></div></div>
           </div>
-          <p className="notice small">시작하면 {info.duration_minutes}분 타이머가 흐릅니다. 창을 닫으면 멈추고, 같은 링크로 다시 들어오면 이어집니다.</p>
+          <p className="notice small">업무 내용은 직접 하지 않아요. "작업 계속하기"에 어떤 업무를 할지 적으면 그 업무가 한 칸 오르고 시간이 몇 분 지나요(한 번에 한 업무, 대화로는 진행되지 않음). 시작하면 {info.duration_minutes}분 타이머가 흐르고, 창을 닫으면 멈췄다가 같은 링크로 다시 들어오면 이어집니다.</p>
           <button onClick={start} style={{ width: "100%", marginTop: 8 }}>시작하기</button>
         </div>
       </Shell>
@@ -111,11 +110,12 @@ export default function InvitePage() {
         <p className="muted">{info.alias}님, 예상 소요 시간은 <b>{info.duration_minutes}분</b>입니다. 가입 없이 이 링크로 진행해요.</p>
         <h2 style={{ marginTop: 16 }}>시작 전 안내</h2>
         <ul>
-          <li><b>평가 형식</b>: 가상 회사에서 AI 동료와 함께 신규 기능 기획안을 작성합니다. 대화와 문서는 모두 텍스트로 진행됩니다.</li>
-          <li><b>관찰 항목</b>: 책임감, 존중·소통, 협력 태도, 유연성, 그리고 AI 활용 방식.</li>
-          <li><b>기록 방식</b>: 메시지, 응답 시점, 분업 결정, 문서 변경, AI 어시스턴트 요청과 결과 활용이 기록됩니다.</li>
-          <li><b>AI 사용</b>: 동료와 팀장은 AI입니다. AI 어시스턴트는 자유롭게 쓸 수 있고, 사용 기록이 남습니다. 쓰지 않아도 불이익은 없습니다.</li>
-          <li><b>최종 판단</b>: AI는 점수나 합격 여부를 정하지 않습니다. 관찰 기록을 채용 담당자가 직접 검토하고 판단합니다.</li>
+          <li><b>평가 형식</b>: 가상 회사에서 AI 동료와 함께 프로젝트 하나를 맡아 진행합니다. 업무 실력이 아니라 함께 일하는 방식을 보므로, 업무 내용은 직접 하지 않고 대화와 짧은 업무 메모로 진행됩니다.</li>
+          <li><b>업무 진행 방식</b>: 업무마다 필요한 칸이 있어요. "작업 계속하기"에 어떤 업무를 할지 적으면 그 업무 하나가 한 칸 오르고 시간이 몇 분 지나요. 대화만으로는 업무가 진행되지 않아요. "업무 마치기"는 팀장님이 보고를 요청한 뒤에 누를 수 있어요.</li>
+          <li><b>관찰 항목</b>: 책임감·성실성, 계획성·꼼꼼함, 적응성·유연성, 협업·조율, 정직·공정한 보고.</li>
+          <li><b>기록 방식</b>: 메시지와 보낸 시점, 분업 결정, 업무 메모가 기록됩니다.</li>
+          <li><b>AI 사용</b>: 동료와 팀장은 AI입니다. 대화 중에 몇 가지 상황이 일어날 수 있고, 끝난 뒤 무엇이 연출된 상황이었는지 알려 드립니다.</li>
+          <li><b>결과 표시와 최종 판단</b>: 역량마다 관찰된 행동과 근거 원문, 그리고 관찰된 행동 수로 정해진 기준에 따라 계산한 참고 등급(A~E)이 채용 담당자에게 전달됩니다. AI는 합격 여부를 정하지 않고, 최종 판단은 채용 담당자가 합니다.</li>
         </ul>
         <label className="row" style={{ margin: "12px 0" }}>
           <input type="checkbox" style={{ width: "auto" }} checked={agree} onChange={(e) => setAgree(e.target.checked)} />

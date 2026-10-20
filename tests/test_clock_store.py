@@ -18,11 +18,11 @@ def test_clock_scale_and_cap():
 
 
 def test_due_scenes_in_order_without_rerun():
-    due = clock.due_scenes(settings.scenes(), 50, {"kickoff", "kickoff_greeting"})
-    assert [s["id"] for s in due] == ["negotiate", "coop_help", "resp_delay"]
+    due = clock.due_scenes(settings.scenes(), 20, {"kickoff", "kickoff_greeting"})
+    assert [s["id"] for s in due] == ["negotiate", "coworker_miss", "lead_checkin"]
 
 
-def test_interviews_hidden_until_0105():
+def test_interviews_hidden_until_0105(late_interviews):
     ids_64 = {d["id"] for d in clock.available_docs(settings.docs_index(), 64.9)}
     ids_65 = {d["id"] for d in clock.available_docs(settings.docs_index(), 65)}
     assert "interviews" not in ids_64 and "interviews" in ids_65
@@ -38,5 +38,6 @@ def test_claim_scene_once_even_concurrently():
 def test_session_and_board_defaults():
     sid = store.create_session("지원자B")
     tasks = store.list_tasks(sid)
-    assert [t["owner"] for t in tasks] == ["candidate", "candidate", "both", "coworker", "coworker"]
+    # 동료의 첫 분담안(pack.toml): 동료가 3·4번(사례·아이디어), 지원자가 1·2·5번
+    assert [t["owner"] for t in tasks] == ["candidate", "candidate", "coworker", "coworker", "candidate"]
     assert store.get_session(sid)["phase"] == "waiting"

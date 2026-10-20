@@ -9,7 +9,11 @@
            │                                        └─ 미합의 ─→ counter_proposal ─→ END (다음 메시지에서 다시 판단: 반복)
            └─ 그 외 ───────────→ reply ─→ END
 
-분업 조정은 최대 config [negotiation].max_rounds회(F-21). 이벤트 실행 시점은 engine이 시계로 정한다.
+- 답하는 사람: 동료 1:1은 동료, 팀장 1:1은 팀장, 팀 채널은 동료 이름을 부르면 동료·아니면 팀장(persona.responder).
+- 후속 반응: 장면에 follow_up이 있으면, 그 장면 뒤 지원자가 같은 채널에서 처음 답할 때 한 번만 덧붙인다.
+- 업무 지문 장면(speaker = narrator)은 LLM 없이 정해진 문장을 업무 기록(work)에 남긴다.
+
+분업 조정은 최대 config [negotiation].max_rounds회(F-21). 장면 실행 시점은 engine이 시계로 정한다.
 """
 import logging
 from typing import Literal, TypedDict
@@ -19,12 +23,12 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
-from app import llm, persona, store
+from app import llm, persona, store, work
 from app.mcp_client import call_business
-from app.settings import config, coworker_parts, names, scene_by_id
+from app.settings import config, scene_by_id, scenes
 
 log = logging.getLogger("dayzero.graph")
-ALL_CHANNELS = ("team", "dm", "system")
+FOLLOW_UP_PREFIX = "followup:"   # 후속 반응을 한 번만 쓰게 장면 실행 기록(scene_runs)에 남기는 키
 
 
 class TurnState(TypedDict, total=False):
@@ -50,7 +54,7 @@ class Agreement(BaseModel):
     about_split: bool = Field(description="메시지가 업무 분담에 관한 이야기면 true")
     agreed: bool = Field(description="지원자가 현재 분담안을 그대로 받아들였으면 true")
     requested: list[PartOwner] = Field(default_factory=list,
-                                       description="지원자가 바꾸자고 한 파트만. 없으면 빈 목록")
+                                       description="지원자가 바꾸자고 한 업무만. 없으면 빈 목록")
 
 
 async def _mark_coworker_cards(session_id: str, assignment: dict[str, str], status: str) -> None:
@@ -74,45 +78,34 @@ def _already_said(session_id: str, scene: dict) -> bool:
     return False
 
 
+def scene_task(scene: dict) -> str:
+    """장면 대사를 만들 때 페르소나에게 주는 지시. 괄호 안은 말하는 방식에 대한 지시다(말로 옮기지 않는다)."""
+    return f"다음 내용을 네 말로 빠짐없이 전달하라. 괄호 안은 지시이니 말로 옮기지 마라: {scene['message']}"
+
+
 async def run_scene(state: TurnState) -> TurnState:
     """시나리오 장면을 실행한다. 전달 내용은 고정, 문장만 페르소나가 자연스럽게 바꾼다(PRD 6.4)."""
     scene = scene_by_id(state["trigger"]["scene_id"], state["scenario"])
     sid, update = state["session_id"], {}
-    if scene["speaker"] == "system":
-        _post(state, "system", "system", scene["message"])
+    if scene["speaker"] in ("system", "narrator"):   # 알림·업무 지문은 정해진 문장 그대로(진척 요약은 코드가 채움)
+        text = scene["message"].replace("{progress_summary}", work.summary(sid, state["scenario"]))
+        _post(state, scene["channel"], scene["speaker"], text)
         return update
-    task = f"다음 내용을 빠짐없이 전달하라: {scene['message']}"
+    task = scene_task(scene)
     if scene["id"] == "negotiate":
         update = {"phase": "negotiate"}
-    shared = []
-    if scene.get("shares_coworker_parts"):
-        for part in coworker_parts(state["scenario"]):
-            key = str(part["part"])
-            # 지원자가 맡기로 한 파트는 덮어쓰지 않는다. 3번(핵심 기능)은 이벤트 내용이므로 항상 공유.
-            if key == "3" or state["assignment"].get(key) != "candidate":
-                store.upsert_part(sid, f"coworker:{key}", part["body"].strip(), state["minute"])
-                shared.append(f"[{key}번 {part['title']}]\n{part['body'].strip()}")
-        # 공유 내용은 코드가 원문 그대로 붙인다(F-23 정해진 내용). LLM은 인사만 하고 특정 항목을 짚지 않는다.
-        nums = ", ".join(s.split("번", 1)[0].strip("[") + "번" for s in shared)
-        # 지원자가 3번을 혼자 맡았을 수도 있으므로 "내가 맡은"이라고 단정하지 않는다(사실과 다른 말 방지).
-        task = (f"기획안 {nums}에 넣을 너({names(state['scenario'])['coworker']})의 작업 내용을 공유 문서에 올렸으니, 지원자에게 "
-                "리뷰해 달라고 한두 문장으로 짧게 부탁하라. '내가 맡은 파트'라고 단정하지 마라. "
-                "지원자를 '도현님'이라고 부르지 마라. 내용을 요약하거나 특정 항목을 언급하지 마라.")
     must_include, fallback = scene.get("must_include"), scene.get("fallback")
     if scene.get("if_already_said") and _already_said(sid, scene):
         # 지원자가 먼저 물어 이미 전달한 내용이면 반복하지 않고 짧게 확인한다(같은 말 두 번 방지)
         task, must_include, fallback = scene["if_already_said"], None, scene["if_already_said_fallback"]
     # 장면 대사는 필수 내용(must_include)이 들어갔는지 코드가 검증하고, 끝내 빠지면 원문 대사를 쓴다(F-23).
     try:
-        text = await persona.speak(scene["speaker"], sid, state["minute"], task, ALL_CHANNELS,
-                                   use_tools=False, must_include=must_include, fallback=fallback)
+        text = await persona.speak(scene["speaker"], sid, state["minute"], task, use_tools=False,
+                                   must_include=must_include, fallback=fallback)
     except Exception:   # LLM이 끝내 실패해도 세션이 멈추지 않게 정해진 대사로 진행한다(F-23, PRD A.4)
         log.exception("장면 대사 생성 실패, 대체 대사 사용: session=%s scene=%s", sid, scene["id"])
         llm.trace({"session": sid, "node": "graph.run_scene", "fallback": scene["id"]})
         text = fallback
-    if shared:
-        text += "\n\n" + "\n\n".join(shared)
-        await _mark_coworker_cards(sid, state["assignment"], "done")
     _post(state, scene["channel"], scene["speaker"], text)
     if update:
         store.update_session(sid, **update)
@@ -148,7 +141,7 @@ async def counter_proposal(state: TurnState) -> TurnState:
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"지원자의 요청을 반영한 분담안을 다시 제안하고 이대로 괜찮은지 물어라: "
-        f"{persona.assignment_text(assignment, state['scenario'])}", ALL_CHANNELS, use_tools=False)
+        f"{persona.assignment_text(assignment, state['scenario'])}", use_tools=False)
     _post(state, "dm", "coworker", text)
     return {"assignment": assignment, "negotiation_round": rounds}
 
@@ -165,20 +158,39 @@ async def apply_assignment(state: TurnState) -> TurnState:
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"분담을 확정했다고 짧게 알리고 태스크 보드에 반영했다고 말하라: "
-        f"{persona.assignment_text(assignment, state['scenario'])}{note}", ALL_CHANNELS, use_tools=False)
+        f"{persona.assignment_text(assignment, state['scenario'])}{note}", use_tools=False)
     _post(state, "dm", "coworker", text)
     return {"assignment": assignment, "phase": "work", "negotiation_round": rounds}
 
 
+def pending_follow_up(session_id: str, role: str, channel: str, pack: str | None = None) -> dict | None:
+    """이 역할이 이 채널에서 아직 쓰지 않은 후속 반응 중 가장 최근 장면. 없으면 None.
+
+    더 최근 장면의 후속 반응을 쓰면 그 전 장면의 것은 지나간 것으로 본다(오래된 반응이 뒤늦게 나오지 않게).
+    """
+    runs = store.scene_run_minutes(session_id)
+    ran = [s for s in scenes(pack) if s.get("follow_up") and s["speaker"] == role
+           and s["channel"] == channel and s["id"] in runs]
+    if not ran:
+        return None
+    latest = max(ran, key=lambda s: runs[s["id"]])
+    return None if f"{FOLLOW_UP_PREFIX}{latest['id']}" in runs else latest
+
+
 async def reply(state: TurnState) -> TurnState:
-    """지원자 메시지에 답한다. 1:1이면 동료, 팀 채널이면 팀장. 회사 정보는 문서 검색 후 출처를 밝힌다."""
-    channel = state["trigger"]["channel"]
-    role = "coworker" if channel == "dm" else "lead"
-    review = persona.is_review_request(state["trigger"]["text"])
-    task = ("방금 지원자가 기획안 검토를 부탁했다. 공유 문서를 읽고 구체적인 의견을 1~2개 줘라."
-            if review else "방금 지원자가 보낸 메시지에 답하라.")
-    text = await persona.speak(role, state["session_id"], state["minute"], task, ALL_CHANNELS,
-                               review=review)
+    """지원자 메시지에 답한다. 답하는 사람은 채널로 정한다. 회사 정보는 문서 검색 후 출처를 밝힌다."""
+    sid, channel = state["session_id"], state["trigger"]["channel"]
+    role = persona.responder(channel, state["trigger"]["text"], state["scenario"])
+    task = "방금 지원자가 보낸 메시지에 답하라."
+    follow = pending_follow_up(sid, role, channel, state["scenario"])
+    if follow and store.claim_scene(sid, f"{FOLLOW_UP_PREFIX}{follow['id']}", state["minute"]):
+        # 후속 반응은 장면마다 한 번만(지원자마다 같은 조건). 그 전 장면들의 반응도 지나간 것으로 표시한다.
+        for s in scenes(state["scenario"]):
+            if s.get("follow_up") and s["speaker"] == role and s["channel"] == channel:
+                store.claim_scene(sid, f"{FOLLOW_UP_PREFIX}{s['id']}", state["minute"])
+        task += f" 이때 다음 반응을 한 번 담아라: {follow['follow_up']}"
+        llm.trace({"session": sid, "node": "graph.follow_up", "scene": follow["id"]})
+    text = await persona.speak(role, sid, state["minute"], task)
     _post(state, channel, role, text)
     return {}
 
@@ -187,7 +199,7 @@ async def finalize_split(state: TurnState) -> TurnState:
     """분업 조정이 끝나기 전에 첫 이벤트 시각이 오면, 지금 안으로 확정한다.
 
     PRD가 정하지 않은 빈칸을 채운 처리다. F-21의 "마지막 안으로 진행"과 같은 방식이며,
-    이벤트가 나올 때 담당이 항상 정해져 있게 한다(가이드 7절).
+    이벤트가 나올 때 담당이 항상 정해져 있게 한다.
     """
     assignment = state["assignment"]
     await call_business("assign_tasks", {"session_id": state["session_id"], "assignment": assignment})
@@ -197,7 +209,7 @@ async def finalize_split(state: TurnState) -> TurnState:
         "coworker", state["session_id"], state["minute"],
         f"분담 얘기가 아직 안 끝났지만 시간이 됐으니 일단 지금 안으로 진행하자고 부드럽게 알리고, "
         f"태스크 보드에 반영했다고 말하라: {persona.assignment_text(assignment, state['scenario'])}",
-        ALL_CHANNELS, use_tools=False)
+        use_tools=False)
     _post(state, "dm", "coworker", text)
     return {"phase": "work"}
 

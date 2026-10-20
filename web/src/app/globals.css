@@ -127,5 +127,15 @@ td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line);
 .msgline { padding: 4px 6px; }
 
 /* AI 어시스턴트 패널: 내용만큼 자라고 줄지 않는다. 대화 영역은 일정 높이 안에서 스크롤 */
-.assistant-panel { display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto; }
-.assistant-panel .chat { flex: none; height: 300px; min-height: 0; }
+.work-panel { display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto; }
+.work-panel .chat { flex: none; height: 300px; min-height: 0; }
+/* 업무 기록: 나의 메모와 정해진 지문 */
+.memo { align-self: flex-end; max-width: 90%; background: var(--brand-soft); border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+.narration { background: #f8fafc; border: 1px dashed var(--line); border-radius: 10px; padding: 8px 10px; font-size: 13px; color: var(--muted); }
+/* 업무 진척 칸 */
+.cells { display: inline-flex; align-items: center; gap: 3px; }
+.cells i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; background: #e5e7eb; }
+.cells i.on { background: var(--brand); }
+.cells .small { margin-left: 4px; }
+/* 안 읽은 메시지 수 */
+.unread { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; }

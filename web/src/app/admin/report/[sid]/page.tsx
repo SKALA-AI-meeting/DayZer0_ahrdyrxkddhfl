@@ -9,11 +9,15 @@ import { api, Msg } from "@/lib/api";
 type Observed = { behavior: string; quote: string; when: string; source?: string; message_id?: number | null; points?: string[] };
 type Section = {
   element: string; situation: string; observed: Observed[]; note?: string; summary?: string;
+  grade?: string; basis?: { positive: string[]; negative: string[]; possible?: number };
   followups?: { id: number; when: string }[];
   review?: { when: string; quote: string; message_id: number | null }[];
-  requests?: { when: string; request: string; reuse: string }[];
 };
-type Data = { alias: string; status: string; names: Record<string, string>; pack: { company: string; task_title: string }; report: { sections: Section[]; disclaimer: string } | null;
+type Memo = { when: string; memo: string; category: string; part?: string; advanced?: boolean; message_id: number };
+type Progress = { part: string; done: number; units: number; owner: string };
+// 참고 등급 색(A~E·판단 보류). 등급 이름은 서버 config [grade]에서 온다.
+const GRADE_CLASS: Record<string, string> = { A: "report_ready", B: "report_ready", C: "in_progress", D: "failed", E: "failed" };
+type Data = { alias: string; status: string; names: Record<string, string>; pack: { company: string; task_title: string }; report: { sections: Section[]; memos?: Memo[]; progress?: Progress[]; disclaimer: string } | null;
   report_state: string | null; messages: Msg[] };
 
 export default function ReportPage() {
@@ -52,10 +56,19 @@ export default function ReportPage() {
       ) : (
         <>
           <p className="muted">{data.report.disclaimer}</p>
+          <p className="muted small">역량마다 관찰 항목 수가 달라(2~4개) 등급은 역량 안에서의 참고 지표예요. 역량끼리 등급을 비교하지 마세요.</p>
           {data.report.sections.map((s) => (
             <div className="card" key={s.element}>
-              <h2>{s.element}</h2>
+              <h2 className="row" style={{ gap: 8 }}>{s.element}
+                {s.grade && <span className={`badge ${GRADE_CLASS[s.grade] ?? ""}`}>{s.grade}</span>}</h2>
               <p className="muted">상황: {s.situation}</p>
+              {s.basis && s.grade !== "판단 보류" && (
+                <p className="small muted" style={{ marginTop: -4 }}>
+                  등급 근거 — 관찰된 바람직한 행동 {s.basis.positive.length}/{s.basis.possible ?? "?"}개
+                  {s.basis.positive.length > 0 && ` (${s.basis.positive.join(", ")})`}
+                  {s.basis.negative.length > 0 && ` · 반대 방향 행동 ${s.basis.negative.length}개 (${s.basis.negative.join(", ")}) → 하나당 한 단계 내림`}
+                </p>
+              )}
               {s.summary && (
                 <div className="notice small" style={{ marginBottom: 10 }}>
                   <b>근거 정리</b> <span className="muted">(AI가 아래 근거만 나란히 적은 것이며 판단이 아닙니다. 번호는 아래 근거 번호)</span>
@@ -67,22 +80,14 @@ export default function ReportPage() {
                   {o.points && o.points.length > 0 && (
                     <div className="muted small">[{i + 1}] 관찰 포인트: {o.points.join(" · ")}</div>
                   )}
-                  <div>{!(o.points && o.points.length) && <span className="muted small">[{i + 1}] </span>}<span className="time">{o.source === "대화" ? `${o.when} 대화` : o.when}</span>{o.behavior}</div>
+                  <div>{!(o.points && o.points.length) && <span className="muted small">[{i + 1}] </span>}<span className="time">{o.when} {o.source}</span>{o.behavior}</div>
                   <div className="quote">
                     “{o.quote}”{" "}
-                    {o.message_id ? <a href="#" onClick={(e) => { e.preventDefault(); jumpTo(o.message_id!); }}>대화에서 보기</a>
-                      : !o.when.startsWith("기획안") && !o.source && <a href="#" onClick={(e) => { e.preventDefault(); jump(o.quote); }}>대화에서 보기</a>}
+                    {o.message_id ? <a href="#" onClick={(e) => { e.preventDefault(); jumpTo(o.message_id!); }}>기록에서 보기</a>
+                      : <a href="#" onClick={(e) => { e.preventDefault(); jump(o.quote); }}>기록에서 보기</a>}
                   </div>
                 </div>
               ))}
-              {s.requests && s.requests.length > 0 && (
-                <table>
-                  <thead><tr><th>시각</th><th>어시스턴트 요청</th><th>기획안 반영</th></tr></thead>
-                  <tbody>{s.requests.map((q, i) => (
-                    <tr key={i}><td>{q.when}</td><td>{q.request}</td><td>{q.reuse}</td></tr>
-                  ))}</tbody>
-                </table>
-              )}
               {s.review && s.review.length > 0 && (
                 <div style={{ marginTop: 10 }}>
                   <div className="small"><b>판단이 필요한 원문</b> <span className="muted">(부정·제외 표현이 있어 AI가 자동 판정에서 뺐어요. 원문을 보고 판단해 주세요)</span></div>
@@ -108,10 +113,35 @@ export default function ReportPage() {
               )}
             </div>
           ))}
+          {data.report.progress && (
+            <div className="card">
+              <h2>업무 진척 (세션 종료 시점)</h2>
+              <p className="muted small">"작업 계속하기"로 쌓인 칸을 코드가 센 사실이에요. <b>평가 항목이 아니에요</b>(업무 실력이나 속도를 보지 않음). 보고 내용이 실제와 같은지 볼 때만 쓰세요.</p>
+              <table>
+                <thead><tr><th>업무</th><th>담당</th><th>진척</th></tr></thead>
+                <tbody>{data.report.progress.map((p) => (
+                  <tr key={p.part}><td>{p.part}</td><td>{data.names[p.owner] ?? p.owner}</td><td>{p.done}/{p.units}칸{p.done >= p.units ? " (완료)" : ""}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          {data.report.memos && data.report.memos.length > 0 && (
+            <div className="card">
+              <h2>업무 메모</h2>
+              <p className="muted small">지원자가 "작업 계속하기"에 적은 메모와 분류(지문을 고르는 데만 쓰며 판단이 아닙니다).</p>
+              <table>
+                <thead><tr><th>시각</th><th>메모</th><th>분류</th><th>진행한 업무</th></tr></thead>
+                <tbody>{data.report.memos.map((m) => (
+                  <tr key={m.message_id}><td>{m.when}</td><td>{m.memo}</td><td>{m.category}</td>
+                    <td>{m.part ? `${m.part}${m.advanced ? " +1칸" : " (진척 없음)"}` : "—"}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
       <div className="card">
-        <h2>전체 대화 기록</h2>
+        <h2>전체 대화·업무 기록</h2>
         {data.messages.map((m) => (
           <div key={m.id} id={`m${m.id}`} className={`msgline ${focus === m.id ? "highlight" : ""}`}>
             <span className="muted">[{m.time}][{m.channel}]</span>{" "}

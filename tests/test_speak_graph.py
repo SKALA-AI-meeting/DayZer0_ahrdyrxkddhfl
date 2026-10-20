@@ -15,7 +15,7 @@ def test_check_judgement_missing_and_citation():
     assert sg.check("운영 정책 문서 참고하세요", [], [], False) == "ok"
 
 
-def test_saying_unreleased_doc_is_unavailable_is_not_citation_error():
+def test_saying_unreleased_doc_is_unavailable_is_not_citation_error(late_interviews):
     # 00:55에 "인터뷰 요약은 아직 볼 수 없다"고 말하는 건 근거 인용이 아니다(공개 전 문서는 검사 대상 아님)
     text = "'사용자 인터뷰 요약' 문서는 아직 공유되지 않아 볼 수 없어요."
     assert sg.check(text, [], [], True, minute=55) == "ok"
@@ -32,26 +32,10 @@ def test_promise_without_tool_call_is_deferral():
     assert sg.check(text, [], [], False, tools_used=0) == "ok"     # 도구가 없는 장면 대사는 대상 아님
 
 
-def test_review_request_requires_reading_shared_plan():
-    # 검토 요청에는 공유 문서를 실제로 읽어야 한다(읽지 않고 "확인했습니다"만 하면 실패)
-    text = "3번 작성해 주신 부분 확인했습니다! 4·5번 작업할게요."
-    assert sg.check(text, [], [], True, tools_used=1, called_tools=["search_company_docs"],
-                    required_tool="read_shared_plan") == "not_read"
-    assert sg.check(text, [], [], True, tools_used=1, called_tools=["read_shared_plan"],
-                    required_tool="read_shared_plan") == "ok"
-
-
-def test_review_request_detection():
-    from app import persona
-    assert persona.is_review_request("3번 보완할 부분 있으면 수정해주시고")
-    assert persona.is_review_request("제가 쓴 1번 한번 봐주실 수 있을까요?")
-    assert not persona.is_review_request("사례는 어떤 기준으로 고를까요?")
-
-
 def test_every_scene_fallback_passes_its_own_check():
     # 대체 문장 자체가 검증을 통과해야 한다(F-23 정해진 내용 보장)
     for s in scenes():
-        if s["speaker"] != "system":
+        if s["speaker"] in ("lead", "coworker"):   # 알림·업무 지문은 LLM 없이 정해진 문장 그대로
             assert sg.check(s["fallback"], s["must_include"], [], False) == "ok", s["id"]
 
 
@@ -87,28 +71,28 @@ def test_giving_up_without_lookup_is_no_lookup():
 
 
 def test_coworker_claiming_unshared_work_is_caught():
-    # 공유(01:30) 전인데 "정리해봤는데"처럼 결과물을 이미 만든 것처럼 말하면 실패
+    # 업무를 거의 못 한 동료가 "정리해봤는데"처럼 결과물을 이미 만든 것처럼 말하면 실패
     text = "지금 비슷한 서비스 사례를 찾고 있어요. 몇 가지 사례를 정리해봤는데 같이 볼까요?"
     assert sg.check(text, [], [], True, tools_used=0, unshared=True) == "unshared_claim"
     assert sg.check("지금 4번 사례를 찾는 중이에요.", [], [], True, tools_used=0, unshared=True) == "ok"
-    assert sg.check(text, [], [], True, tools_used=0, unshared=False) == "ok"   # 공유 뒤에는 대상 아님
+    assert sg.check(text, [], [], True, tools_used=0, unshared=False) == "ok"   # 팀장 발화는 대상 아님
 
 
-# 회귀: 팀장이 01:10·01:50에도 킥오프의 "2시간 뒤"를 반복했다 → 코드가 잡고 지금 시각을 알려 다시 쓰게 한다
+# 회귀: 팀장이 중간에도 킥오프의 남은 시간("40분 뒤")을 반복했다 → 코드가 잡고 지금 시각을 알려 다시 쓰게 한다
 def test_stale_deadline_is_rejected_after_kickoff():
-    assert sg.check("2시간 뒤 기획안을 받겠습니다", [["2시간"]], [], False, minute=0) == "ok"   # 킥오프는 정상
-    verdict = sg.check("마감은 그대로 2시간 뒤입니다", [], [], False, minute=70, scenario="pixel")
-    assert verdict == "stale_time:마감 01:50, 남은 시간 약 40분"
-    assert sg.check("마감은 그대로예요", [], [], False, minute=70, scenario="pixel") == "ok"
-    assert sg.check("2시간 뒤까지 제출해 주세요", [], [], False, minute=110).startswith("stale_time:마감 시각(01:50)이 됐다")
+    assert sg.check("40분 뒤에 보고해 주세요", [["40분"]], [], False, minute=0) == "ok"   # 킥오프는 정상
+    verdict = sg.check("마감은 그대로 40분 뒤예요", [], [], False, minute=22)
+    assert verdict == "stale_time:마감 00:38, 남은 시간 약 16분"
+    assert sg.check("마감은 그대로예요", [], [], False, minute=22) == "ok"
+    assert sg.check("40분 뒤까지 보고해 주세요", [], [], False, minute=38).startswith("stale_time:마감 시각(00:38)이 됐다")
 
-    # 중간점검 미미함: 킥오프가 재시도로 0분 뒤에 실행돼도 필수 내용 "2시간"은 막지 않는다
-    assert sg.check("2시간 뒤 2~3쪽 기획안을 받겠습니다", [["2시간"], ["기획안"]], [], False, minute=0.3) == "ok"
+    # 중간점검 미미함: 킥오프가 재시도로 0분 뒤에 실행돼도 필수 내용 "40분"은 막지 않는다
+    assert sg.check("40분 뒤에 진행 상황 보고해 주세요", [["40분"], ["보고"]], [], False, minute=0.3) == "ok"
 
 
-# 회귀: 01:05에 설문 요약이 공개됐는데 01:07에 팀장이 "빨리 공유되면 말씀드리겠습니다"라고 답했다
-def test_stale_doc_is_rejected_after_release():
-    say = "알림이 빨리 공유되면 말씀드리겠습니다"
-    assert sg.check(say, [], [], False, minute=55, scenario="pixel") == "ok"            # 공개 전에는 정상
-    assert sg.check(say, [], [], False, minute=67, scenario="pixel") == "stale_doc:유저 설문 요약"
-    assert sg.check("완성되면 공유할게요", [], [], False, minute=67, scenario="pixel") == "ok"  # 자기 파트 공유 약속은 정상
+# 회귀: 늦게 공개되는 문서가 공개됐는데 팀장이 "공유되면 말씀드리겠습니다"라고 답했다
+def test_stale_doc_is_rejected_after_release(late_interviews):
+    say = "인터뷰 요약이 공유되면 말씀드리겠습니다"
+    assert sg.check(say, [], [], False, minute=55) == "ok"                              # 공개 전에는 정상
+    assert sg.check(say, [], [], False, minute=67) == "stale_doc:사용자 인터뷰 요약"
+    assert sg.check("완성되면 정리해서 드릴게요", [], [], False, minute=67) == "ok"

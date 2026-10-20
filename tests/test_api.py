@@ -38,31 +38,71 @@ def test_invite_flow_requires_consent_and_expires():
     path = client.post("/api/admin/invites", json={"alias": "지원자1"}, headers=a).json()["invite_path"]
     token = path.rsplit("/", 1)[1]
     info = client.get(f"/api/invite/{token}").json()
-    assert info["state"] == "valid" and info["duration_minutes"] == 120
+    assert info["state"] == "valid" and info["duration_minutes"] == 40
     assert client.post(f"/api/invite/{token}/start").status_code == 400   # 동의 전 시작 불가
     store.update_session(store.session_by_invite(token)["id"], invite_expires_at=time.time() - 1)
     assert client.post(f"/api/invite/{token}/consent").status_code == 410  # 72시간 만료
     assert client.get("/api/invite/없는토큰").status_code == 404
 
 
-def test_docs_gated_and_completed_link(monkeypatch):
+def test_docs_readable_and_completed_link(monkeypatch):
+    # 공개 전 문서 차단은 MCP 서버(별도 프로세스)가 하므로 tests/test_mcp_servers.py에서 같은 프로세스로 검사한다
     a = _signup()
     token = client.post("/api/admin/invites", json={"alias": "x"}, headers=a).json()["invite_path"].rsplit("/", 1)[1]
     sid = store.session_by_invite(token)["id"]
-    store.update_session(sid, status="in_progress", sim_seconds=30 * 60)
-    assert client.get(f"/api/invite/{token}/docs/interviews").status_code == 403   # 01:05 전
+    store.update_session(sid, status="in_progress", sim_seconds=10 * 60)
+    assert client.get(f"/api/invite/{token}/docs/interviews").status_code == 200   # 지금 시나리오는 처음부터 공개
     assert client.get(f"/api/invite/{token}/docs/policy").status_code == 200
     store.update_session(sid, status="report_ready")
     assert client.post(f"/api/invite/{token}/messages", json={"channel": "dm", "text": "hi"}).status_code == 409
-    assert len(client.get(f"/api/invite/{token}/debrief").json()["events"]) == 4
+    events = client.get(f"/api/invite/{token}/debrief").json()["events"]
+    # 디브리핑은 debrief 설명이 있는 장면만(연출된 상황), 내부 지시문(message)이 아니라 설명문을 보인다
+    assert [e["time"] for e in events] == ["00:02", "00:15", "00:20", "00:22", "00:31", "00:32"]
+    assert all("지원자" not in e["message"] or "연락" in e["message"] for e in events)
 
 
-def test_task_board_only_own_cards():
+def test_work_step_records_memo_narration_and_moves_clock(monkeypatch):
+    from app import engine, work
+    async def fake_classify(sid, memo, pack=None):
+        return "own", "1"
+
+    async def fake_business(tool, args):
+        store.set_task_status(args["session_id"], args["part"], args["status"])
+        return "ok"
+    monkeypatch.setattr(work, "classify", fake_classify)
+    monkeypatch.setattr(engine, "call_business", fake_business)
     a = _signup()
     token = client.post("/api/admin/invites", json={"alias": "x"}, headers=a).json()["invite_path"].rsplit("/", 1)[1]
-    store.update_session(store.session_by_invite(token)["id"], status="in_progress")
-    assert client.put(f"/api/invite/{token}/tasks/1", json={"status": "doing"}).status_code == 200
-    assert client.put(f"/api/invite/{token}/tasks/4", json={"status": "doing"}).status_code == 403
+    sid = store.session_by_invite(token)["id"]
+    for scene in ("kickoff", "kickoff_greeting", "negotiate"):
+        store.claim_scene(sid, scene, 0)
+    store.update_session(sid, status="in_progress", sim_seconds=3 * 60, phase="work")
+    assert client.post(f"/api/invite/{token}/work", json={"text": ""}).status_code == 400
+    assert client.post(f"/api/invite/{token}/work", json={"text": "가" * 101}).status_code == 400   # 100자 제한
+    r = client.post(f"/api/invite/{token}/work", json={"text": "1번 지표 분석부터 할게요"})
+    assert r.status_code == 200 and 7.9 < r.json()["minute"] < 8.5                 # 3분 → 8분(skip_minutes=5)
+    log = store.list_messages(sid, channels=("work",))
+    assert [m["sender"] for m in log] == ["candidate", "narrator"]
+    assert log[1]["content"] == "[내 업무 진행] 1번 지표 분석: 한 칸 진행했다 (1/2칸)."
+    assert store.work_memos(sid) == {log[0]["id"]: {"category": "own", "part": "1", "advanced": True}}
+    poll = client.get(f"/api/invite/{token}/poll").json()
+    assert poll["progress"]["1"] == {"done": 1, "units": 2, "visible": True}
+    assert poll["progress"]["3"]["visible"] is False                 # 동료 업무 진척은 보이지 않음(메운 칸이 없으면)
+    assert {t["part"]: t["status"] for t in poll["tasks"]}["1"] == "doing"
+    assert client.put(f"/api/invite/{token}/tasks/1", json={"status": "doing"}).status_code in (404, 405)   # 카드는 읽기 전용
+
+
+def test_finish_only_after_report_request():
+    a = _signup()
+    token = client.post("/api/admin/invites", json={"alias": "x"}, headers=a).json()["invite_path"].rsplit("/", 1)[1]
+    sid = store.session_by_invite(token)["id"]
+    store.update_session(sid, status="in_progress", sim_seconds=10 * 60)
+    assert client.get(f"/api/invite/{token}/poll").json()["can_finish"] is False
+    r = client.post(f"/api/invite/{token}/submit")
+    assert r.status_code == 400 and "보고를 요청한 뒤" in r.json()["detail"]
+    store.claim_scene(sid, "report_request", 32)
+    assert client.post(f"/api/invite/{token}/submit").status_code == 200
+    assert store.get_session(sid)["status"] != "in_progress"
 
 
 def test_admin_can_retry_only_failed_report(monkeypatch):

@@ -11,33 +11,112 @@ import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app import clock, guard, llm, observe, store
+from app import clock, guard, llm, observe, store, work
 from app.mcp_client import call_business
-from app.settings import config, prompt
+from app.settings import config, observation_spec, prompt
 
 log = logging.getLogger("dayzero.report")
 NOT_OBSERVED = "해당 상황에서 관련 행동이 기록되지 않음"
 NOT_HAPPENED = "세션이 이 상황 전에 끝나 관찰할 수 없음"
-NOT_USED = "사용하지 않음"
+SOURCE = {"team": "팀 채널", "dm": "동료 1:1", "lead_dm": "팀장 1:1", "work": "업무 메모"}   # 근거 출처 표시
+
+
+def _message(evidence_id: str, session_id: str) -> dict | None:
+    if evidence_id.startswith("m") and evidence_id[1:].isdigit():
+        for m in store.list_messages(session_id):
+            if m["id"] == int(evidence_id[1:]):
+                return m
+    return None
 
 
 def _minute_of(evidence_id: str, session_id: str) -> str:
-    if evidence_id.startswith("view:"):   # 문서 열람 기록
-        return clock.format_minute(float(evidence_id.split(":", 1)[1]))
-    if evidence_id.startswith("m"):
-        for m in store.list_messages(session_id):
-            if f"m{m['id']}" == evidence_id:
-                return clock.format_minute(m["minute"])
-    if evidence_id.startswith("plan:"):
-        return f"기획안 {evidence_id.split(':', 1)[1]}번"
-    return "기획안"
+    m = _message(evidence_id, session_id)
+    return clock.format_minute(m["minute"]) if m else ""
+
+
+def _source_of(evidence_id: str, session_id: str) -> str:
+    m = _message(evidence_id, session_id)
+    return SOURCE.get(m["channel"], "대화") if m else "대화"
+
+
+def progress_view(session_id: str) -> list[dict]:
+    """세션이 끝났을 때 업무별 진척(코드가 계산한 사실). 보고 내용과 나란히 볼 수 있게 리포트에 넣는다."""
+    pack = store.get_session(session_id)["scenario"]
+    done, need = work.progress(session_id, pack), work.units(pack)
+    owner = store.get_session(session_id)["assignment"]
+    return [{"part": work.part_name(p, pack), "done": done[p], "units": need[p], "owner": owner.get(p, "")}
+            for p in need]
+
+
+def memo_log(session_id: str) -> list[dict]:
+    """업무 메모와 그 범주(판단 없이 기록만). 리포트 끝에 시간 순으로 보인다."""
+    pack = store.get_session(session_id)["scenario"]
+    recs = store.work_memos(session_id)
+    out = []
+    for m in store.list_messages(session_id, channels=("work",)):
+        if m["sender"] != "candidate":
+            continue
+        rec = recs.get(m["id"], {"category": work.FALLBACK_CATEGORY, "part": "", "advanced": False})
+        out.append({"when": clock.format_minute(m["minute"]), "memo": m["content"],
+                    "category": work.label(rec["category"], pack),
+                    "part": work.part_name(rec["part"], pack) if rec["part"] else "",
+                    "advanced": rec["advanced"], "message_id": m["id"]})
+    return out
+
+
+def directions(pack: str | None = None) -> dict[str, dict[str, str]]:
+    """역량 → 체크 id → positive | negative | bonus (observation.toml). 규칙 관찰은 bonus(분자에만 더하는 가산점)."""
+    out = {}
+    for el in observation_spec(pack)["element"]:
+        d = {c["id"]: c.get("direction", "positive") for c in el["checks"]}
+        d.update({r["id"]: "bonus" for r in el.get("rules", [])})
+        out[el["name"]] = d
+    return out
+
+
+def grade(happened: bool, positive: int, negative: int, possible: int) -> str:
+    """참고 등급 A~E(코드 규칙, config [grade]). LLM은 등급을 매기지 않는다.
+
+    Args:
+        happened: 그 역량의 상황이 세션에서 일어났는가.
+        positive: 검증된 근거가 있는 바람직한 행동 수(가산점 규칙 관찰 포함).
+        negative: 검증된 근거가 있는 반대 방향 행동 수.
+        possible: 그 역량의 바람직한 행동 체크 수(분모, 가산점 제외).
+    """
+    g = config()["grade"]
+    if not happened:
+        return g["pending_label"]
+    labels = g["labels"]
+    ratio = min(positive / possible, 1.0) if possible else 0.0
+    if ratio <= 0:
+        level = len(labels) - 1                                   # E: 바람직한 행동이 하나도 안 드러남
+    else:
+        level = next((i for i, r in enumerate(g["min_ratio"]) if ratio >= r), len(g["min_ratio"]))   # A·B·C 아니면 D
+    level = min(level + negative * g["negative_step"], len(labels) - 1)
+    return labels[level]
+
+
+def grade_result(result: dict, direction: dict[str, str]) -> dict:
+    """판별 결과 하나의 등급과 근거(어떤 바람직한·반대 방향 행동이 몇 개 중 몇 개 관찰됐는지)."""
+    verified = {c["check_id"]: c.get("point", "") for c in result.get("checks", [])
+                if c["answer"] == "yes" and c.get("verified")}
+    pos = [p for cid, p in verified.items() if direction.get(cid, "positive") in ("positive", "bonus")]
+    neg = [p for cid, p in verified.items() if direction.get(cid) == "negative"]
+    possible = sum(1 for d in direction.values() if d == "positive")
+    return {"grade": grade(result.get("happened", True), len(pos), len(neg), possible),
+            "basis": {"positive": pos, "negative": neg, "possible": possible}}
 
 
 def build_body(session_id: str, results: list[dict]) -> dict:
-    """판별 결과를 기업용 리포트 본문으로 바꾼다. yes이면서 인용이 검증된 것만 근거로 쓴다."""
+    """판별 결과를 기업용 리포트 본문으로 바꾼다. yes이면서 인용이 검증된 것만 근거로 쓴다.
+
+    역량마다 참고 등급을 붙인다(코드 규칙, grade). 등급 옆에 어떤 행동이 관찰돼 그 등급이 됐는지 함께 넣는다.
+    """
     sections = []
+    dirs = directions(store.get_session(session_id)["scenario"])
     for r in results:
-        section = {"element": r["element"], "situation": r["situation"], "observed": []}
+        section = {"element": r["element"], "situation": r["situation"], "observed": [],
+                   **grade_result(r, dirs.get(r["element"], {}))}
         for c in r.get("checks", []):
             if c["answer"] == "yes" and c.get("verified"):
                 behavior = c.get("behavior") or ""
@@ -58,7 +137,7 @@ def build_body(session_id: str, results: list[dict]) -> dict:
                         same["points"].append(point)
                     continue
                 eid = c["evidence_id"]
-                source = "기획안" if eid.startswith("plan:") else "문서 열람" if eid.startswith("view:") else "대화"
+                source = _source_of(eid, session_id)
                 section["observed"].append({"behavior": behavior, "quote": quote, "when": when, "source": source,
                                             "points": [point] if point else [],
                                             "message_id": int(eid[1:]) if eid[:1] == "m" and eid[1:].isdigit() else None})
@@ -73,21 +152,18 @@ def build_body(session_id: str, results: list[dict]) -> dict:
                            "message_id": int(eid[1:]) if eid[:1] == "m" and eid[1:].isdigit() else None})
         if review:
             section["review"] = review
-        if "used" in r:   # AI 활용
-            section["requests"] = [{"when": clock.format_minute(q["minute"]), "request": q["request"],
-                                    "reuse": q["reuse"]} for q in r.get("requests", [])]
-            if not r["used"]:
-                section["note"] = NOT_USED
-        elif not r.get("happened", True):
+        if not r.get("happened", True):
             section["note"] = NOT_HAPPENED
-        if not section["observed"] and "note" not in section and not section.get("requests"):
+        if not section["observed"] and "note" not in section:
             section["note"] = NOT_OBSERVED
             # 판단 없이 위치만: 그 상황 이후(관찰 구간) 지원자가 보낸 메시지. 해석은 담당자가 한다(PRD 5.5).
             section["followups"] = [{"id": f["id"], "when": clock.format_minute(f["minute"])}
                                     for f in r.get("followups", [])]
         sections.append(section)
-    return {"session_id": session_id, "sections": sections,
-            "disclaimer": "이 리포트는 관찰 기록입니다. 판단은 채용 담당자가 합니다."}
+    return {"session_id": session_id, "sections": sections, "memos": memo_log(session_id),
+            "progress": progress_view(session_id),
+            "disclaimer": "이 리포트는 관찰 기록입니다. 등급은 관찰된 행동 수로 정해진 기준에 따라 코드가 계산한 참고 지표이며, "
+                          "최종 판단은 채용 담당자가 합니다."}
 
 
 # ---------- 요소별 사실 요약 (근거 정리, 판단 없음) ----------
@@ -95,7 +171,7 @@ def build_body(session_id: str, results: list[dict]) -> dict:
 def _evidence_list(section: dict) -> str:
     lines = []
     for i, o in enumerate(section["observed"], 1):
-        where = o["when"] if o["source"] == "기획안" else f"{o['when']} {o['source']}"
+        where = f"{o['when']} {o['source']}"
         lines.append(f"[{i}] ({where}) 행동: {o['behavior'] or '(없음)'} / 원문: \"{o['quote']}\"")
     return "\n".join(lines)
 

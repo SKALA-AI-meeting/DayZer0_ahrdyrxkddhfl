@@ -1,8 +1,11 @@
-"""동료·팀장·어시스턴트의 말을 만든다(이름·회사는 세션의 시나리오 팩에서).
+"""동료·팀장의 말을 만든다(이름·회사는 세션의 시나리오 팩에서).
 
 - 대화 맥락(Harness: Context): 최근 메시지는 history_token_budget 안에서 원문 그대로 넣고,
   예산을 넘는 앞부분은 LLM으로 요약해 넣는다(요약은 캐시, 판정 표현이 섞이면 버림).
 - 실제 문장 생성과 검증(판정 발언·필수 내용·출처)은 발화 Graph(app/speak_graph.py)가 한다.
+- 볼 수 있는 채널: 동료는 팀 채널·동료 1:1, 팀장은 팀 채널·팀장 1:1(VISIBLE). 업무 메모(work)는 둘 다 못 본다.
+- 장면이 정한 숨은 사실: 장면의 context_before / context_after(events.toml)를 그 장면 발화자의 지시문에 넣는다.
+  예: 동료는 처음부터 다른 업무에 차출돼 일을 못 하고 있지만, 털어놓는 장면 전에는 먼저 꺼내지 않는다.
 """
 import hashlib
 import logging
@@ -10,11 +13,15 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app import clock, docs, guard, llm, speak_graph, store
-from app.settings import config, names, part_titles, prompt
+from app.settings import config, names, pack_info, part_titles, prompt, scenes
 
 log = logging.getLogger("dayzero.persona")
 
 CHARS_PER_TOKEN = 2   # 한국어 대략치: Token 예산을 글자 수로 바꿀 때 쓰는 근사 상수
+# 역할별로 볼 수 있는 채널. 팀장은 지원자와 동료의 1:1을, 동료는 지원자와 팀장의 1:1을 볼 수 없다.
+VISIBLE = {"coworker": ("team", "dm", "system"), "lead": ("team", "lead_dm", "system")}
+# 지원자 메시지가 온 채널 → 답하는 역할. 팀 채널은 team_responder가 정한다.
+CHANNEL_ROLE = {"dm": "coworker", "lead_dm": "lead"}
 
 
 def _split(session_id: str, channels: tuple[str, ...]) -> tuple[list[dict], list[str], list[str]]:
@@ -86,9 +93,30 @@ def shared_late_docs_text(minute: float, company: str = "", pack: str | None = N
     return f"- 늦게 공유된다던 문서 중 이미 공유된 것: {names_}. 지금 회사 문서에서 볼 수 있다\n"
 
 
-def is_review_request(text: str) -> bool:
-    """지원자 메시지가 기획안 검토를 부탁하는지 (표현 목록은 config [verify].review_request_phrases)."""
-    return any(p in text for p in config()["verify"]["review_request_phrases"])
+def team_responder(text: str, pack: str | None = None) -> str:
+    """팀 채널 메시지에 누가 답할지. 동료 이름을 부르면 동료, 아니면 팀장(팀 채널의 진행자)."""
+    info = pack_info(pack)
+    if any(n in text for n in (info["coworker_name"], info["coworker_short"])):
+        return "coworker"
+    return "lead"
+
+
+def responder(channel: str, text: str, pack: str | None = None) -> str:
+    """지원자 메시지에 답할 역할."""
+    return CHANNEL_ROLE.get(channel) or team_responder(text, pack)
+
+
+def scene_context(role: str, session_id: str, pack: str | None = None) -> str:
+    """장면이 정한 숨은 사실 중 이 역할에 해당하는 것(장면 전이면 context_before, 실행 뒤면 context_after)."""
+    ran = store.run_scene_ids(session_id)
+    lines = []
+    for sc in scenes(pack):
+        if sc["speaker"] != role:
+            continue
+        text = sc.get("context_after") if sc["id"] in ran else sc.get("context_before")
+        if text:
+            lines.append(f"- {text}")
+    return "\n".join(lines)
 
 
 def assignment_text(assignment: dict[str, str], pack: str | None = None) -> str:
@@ -98,9 +126,8 @@ def assignment_text(assignment: dict[str, str], pack: str | None = None) -> str:
 
 
 async def speak(role: str, session_id: str, minute: float, task: str,
-                channels: tuple[str, ...], use_tools: bool = True,
-                must_include: list[list[str]] | None = None, fallback: str | None = None,
-                review: bool = False) -> str:
+                channels: tuple[str, ...] | None = None, use_tools: bool = True,
+                must_include: list[list[str]] | None = None, fallback: str | None = None) -> str:
     """페르소나(coworker | lead)의 다음 메시지를 발화 Graph로 만든다(생성 → 코드 검증 → 재시도/대체).
 
     Args:
@@ -108,13 +135,13 @@ async def speak(role: str, session_id: str, minute: float, task: str,
         session_id: 세션 id.
         minute: 현재 세션 시각(분). 문서 공개 시각 판단에 쓴다.
         task: 이번에 할 일(장면의 전달 내용 또는 "지원자 메시지에 답하기").
-        channels: 맥락으로 볼 채널.
+        channels: 맥락으로 볼 채널. 이 역할이 볼 수 있는 채널(VISIBLE)로 다시 거른다. 없으면 볼 수 있는 채널 전부.
         use_tools: 회사 문서 검색 도구를 줄지 여부.
         must_include: 장면 대사에 꼭 들어가야 할 사실(F-23 검증용).
         fallback: 검증을 끝내 통과하지 못했을 때 쓸 문장. 없으면 config의 기본 대체 문장.
     """
-    if role == "lead":   # 팀장은 지원자와 동료의 1:1 대화를 볼 수 없다(팀 채널·알림만)
-        channels = tuple(c for c in channels if c != "dm")
+    # 팀장은 동료 1:1을, 동료는 팀장 1:1을 볼 수 없다. 업무 메모(work)는 지원자 혼자 보는 기록이다.
+    channels = tuple(c for c in (channels or VISIBLE[role]) if c in VISIBLE[role])
     session = store.get_session(session_id)
     pack = session["scenario"]
     system = (f"{prompt(role, pack)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
@@ -122,19 +149,15 @@ async def speak(role: str, session_id: str, minute: float, task: str,
               f"- 마감: {clock.deadline_text(minute, pack)}\n"
               f"{shared_late_docs_text(minute, session['company'], pack)}"
               f"- 지금 볼 수 있는 회사 문서: {docs_text(minute, session['company'], pack)} (이 목록에 없는 문서는 아직 볼 수 없다)")
-    if role == "coworker":   # 대화가 요약돼도 누구의 아이디어인지 잃지 않게 동료 자신의 공유분을 밝혀 둔다
-        mine = {k.split(":")[1]: v for k, v in store.get_parts(session_id).items() if k.startswith("coworker:")}
-        if mine:
-            system += "\n- 네가 공유한 작업(네 아이디어, 지원자가 쓴 것이 아님):\n" + "\n".join(
-                f"  [{p}번] {v}" for p, v in sorted(mine.items()))
+    hidden = scene_context(role, session_id, pack)
+    if hidden:
+        system += "\n## 너만 아는 사실 (지시가 없으면 먼저 꺼내지 않는다)\n" + hidden
     human = (f"최근 대화:\n{await context(session_id, channels)}\n\n지금 할 일: {task}\n"
              "메신저에 보낼 메시지 본문만 써라.")
     result = await speak_graph.speak(
         session_id=session_id, node=f"persona.{role}", system=system, human=human, minute=minute,
         use_tools=use_tools, must_include=must_include, company=session["company"], scenario=pack,
-        plan_access=use_tools,   # 동료·팀장은 공유 문서를 읽을 수 있다(편집은 지원자만)
-        required_tool="read_shared_plan" if review else "",   # 검토 요청이면 실제로 읽었는지 검증
-        # 동료 파트가 아직 공유 전이면 결과물을 지어내지 않는지 검증
-        unshared=role == "coworker" and not any(k.startswith("coworker:") for k in store.get_parts(session_id)),
+        # 동료는 업무를 거의 못 하는 설정이라, 결과물을 만든 것처럼 말하지 않는지 늘 검증한다
+        unshared=role == "coworker",
         fallback=fallback or config()["verify"]["fallback_reply"])
     return result["text"]

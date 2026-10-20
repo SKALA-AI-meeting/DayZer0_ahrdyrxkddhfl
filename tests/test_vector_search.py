@@ -40,7 +40,7 @@ def test_index_records_model_and_dims_and_skips_unchanged():
     assert embedding.ensure_index("") == 0 and calls == []      # 내용이 같으면 다시 임베딩하지 않음
 
 
-def test_vector_search_finds_policy_and_keeps_release_time():
+def test_vector_search_finds_policy_and_keeps_release_time(late_interviews):
     hits = rag.search_company_docs("올해 유료 기능 출시해도 돼?", 30)
     assert hits[0]["doc_id"] == "policy" and hits[0]["via"] == "vector"
     assert all(h["doc_id"] != "interviews" for h in rag.search_company_docs("인터뷰 어색 일정", 30)

@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS admins (
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
-    channel TEXT NOT NULL,             -- team | dm | system | assistant
-    sender TEXT NOT NULL,              -- candidate | coworker | lead | system | assistant
+    channel TEXT NOT NULL,             -- team | dm(동료 1:1) | lead_dm(팀장 1:1) | system | work(업무 메모·지문)
+    sender TEXT NOT NULL,              -- candidate | coworker | lead | system | narrator(업무 지문)
     content TEXT NOT NULL,
     minute REAL NOT NULL,
     created_at REAL NOT NULL
@@ -105,12 +105,6 @@ CREATE TABLE IF NOT EXISTS doc_requests (
     status TEXT NOT NULL,
     created_at REAL NOT NULL
 );
--- 지원자가 회사 문서를 연 기록(AI 활용 "결과 검증" 관찰용: 어시스턴트가 근거로 든 문서를 직접 열어 봤는가)
-CREATE TABLE IF NOT EXISTS doc_views (
-    session_id TEXT NOT NULL,
-    doc_id TEXT NOT NULL,
-    minute REAL NOT NULL
-);
 -- 회사 문서 벡터 색인: 문단(chunk)별 임베딩. 모델 이름·차원을 함께 남긴다(교안 65쪽).
 CREATE TABLE IF NOT EXISTS doc_chunks (
     company TEXT NOT NULL,
@@ -127,6 +121,15 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
 CREATE TABLE IF NOT EXISTS query_embeddings (
     query_hash TEXT PRIMARY KEY,
     embedding TEXT NOT NULL
+);
+-- 업무 메모의 범주·업무·진척(app/work.py). 메모 원문은 messages(channel = work)에 있다.
+CREATE TABLE IF NOT EXISTS work_memos (
+    session_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    part TEXT NOT NULL DEFAULT '',          -- 진행한 업무 번호(없으면 '')
+    advanced INTEGER NOT NULL DEFAULT 0,    -- 이 메모로 그 업무가 한 칸 올랐는가
+    PRIMARY KEY (session_id, message_id)
 );
 -- 장면은 세션당 한 번만 실행. PRIMARY KEY가 중복 실행을 막는다(F-23).
 CREATE TABLE IF NOT EXISTS scene_runs (
@@ -148,6 +151,12 @@ def connect() -> sqlite3.Connection:
     # 이전 DB 파일에 시나리오 팩 컬럼이 없으면 추가한다(기존 세션은 기본 팩)
     if "scenario" not in {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}:
         conn.execute("ALTER TABLE sessions ADD COLUMN scenario TEXT NOT NULL DEFAULT 'moarun'")
+    # 이전 DB 파일의 업무 메모 표에 진척 컬럼이 없으면 추가한다(기존 메모는 진척 없음)
+    memo_cols = {r["name"] for r in conn.execute("PRAGMA table_info(work_memos)")}
+    if "part" not in memo_cols:
+        conn.execute("ALTER TABLE work_memos ADD COLUMN part TEXT NOT NULL DEFAULT ''")
+    if "advanced" not in memo_cols:
+        conn.execute("ALTER TABLE work_memos ADD COLUMN advanced INTEGER NOT NULL DEFAULT 0")
     return conn
 
 
@@ -159,8 +168,8 @@ def create_session(alias: str, *, company: str = "", email: str = "",
     초대(F-02)로 만들 때는 status="invited"와 초대 토큰·만료 시각을 넘긴다.
     """
     session_id = uuid.uuid4().hex[:12]
-    assignment = default_assignment()
     scenario = scenario or default_pack()
+    assignment = default_assignment(scenario)
     titles = part_titles(scenario)
     with connect() as conn:
         conn.execute(
@@ -460,20 +469,6 @@ def generating_reports() -> list[str]:
         return [r["session_id"] for r in conn.execute("SELECT session_id FROM reports WHERE state = 'generating'")]
 
 
-def add_doc_view(session_id: str, doc_id: str, minute: float) -> None:
-    """지원자가 회사 문서를 연 시각을 남긴다."""
-    with connect() as conn:
-        conn.execute("INSERT INTO doc_views (session_id, doc_id, minute) VALUES (?, ?, ?)",
-                     (session_id, doc_id, minute))
-
-
-def doc_views(session_id: str) -> list[dict]:
-    with connect() as conn:
-        rows = conn.execute("SELECT doc_id, minute FROM doc_views WHERE session_id = ? ORDER BY minute",
-                            (session_id,))
-        return [dict(r) for r in rows]
-
-
 def chunk_index(owners: list[str], model: str) -> list[dict]:
     """소유자(팩 키 'pack:<id>' 또는 기업 이름) 기준 색인된 문단 목록."""
     owners = [o for o in owners if o]
@@ -525,3 +520,20 @@ def completed_without_report() -> list[str]:
         rows = conn.execute("SELECT id FROM sessions WHERE status = 'completed' AND id NOT IN"
                             " (SELECT session_id FROM reports)")
         return [r["id"] for r in rows]
+
+
+def add_work_memo(session_id: str, message_id: int, category: str, part: str = "",
+                  advanced: bool = False) -> None:
+    """업무 메모(메시지 id)의 범주, 진행한 업무, 진척이 올랐는지를 남긴다."""
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO work_memos (session_id, message_id, category, part, advanced)"
+                     " VALUES (?, ?, ?, ?, ?)", (session_id, message_id, category, part, int(advanced)))
+
+
+def work_memos(session_id: str) -> dict[int, dict]:
+    """메시지 id → {category, part, advanced}."""
+    with connect() as conn:
+        rows = conn.execute("SELECT message_id, category, part, advanced FROM work_memos WHERE session_id = ?",
+                            (session_id,))
+        return {r["message_id"]: {"category": r["category"], "part": r["part"], "advanced": bool(r["advanced"])}
+                for r in rows}

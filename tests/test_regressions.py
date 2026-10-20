@@ -60,7 +60,7 @@ def test_scene_uses_fallback_when_llm_keeps_failing(monkeypatch):
     for t in (1000.0, 1001.0, 1002.0):
         asyncio.run(engine.tick(sid, t))
     msgs = store.list_messages(sid)
-    assert any("두 번째 모임" in m["content"] for m in msgs)   # 킥오프는 대체 대사로 나와야 한다
+    assert any("22%" in m["content"] for m in msgs)   # 킥오프는 대체 대사로 나와야 한다
 
 
 # 5. 리포트 생성 중 서버가 재시작되면 "생성 중"에 영원히 머문다 → 재시작 때 다시 시도해야 한다(F-34)
@@ -88,8 +88,8 @@ def test_reply_failure_posts_fixed_message(monkeypatch):
     assert last["sender"] == "coworker" and "다시 보내" in last["content"]
 
 
-# 확인필요(나): 팀장은 1:1 대화를 맥락으로 보지 않는다
-def test_lead_does_not_see_dm(monkeypatch):
+# 확인필요(나): 팀장은 동료 1:1을, 동료는 팀장 1:1을 맥락으로 보지 않는다. 업무 메모는 둘 다 못 본다
+def test_lead_and_coworker_see_only_their_channels(monkeypatch):
     from app import persona
     seen = {}
 
@@ -98,14 +98,19 @@ def test_lead_does_not_see_dm(monkeypatch):
         return {"text": "ok", "verdicts": [], "read_titles": []}
     monkeypatch.setattr(persona.speak_graph, "speak", fake_speak)
     sid = store.create_session("x")
-    store.add_message(sid, "dm", "candidate", "비밀 1:1 메시지", 5)
+    store.add_message(sid, "dm", "candidate", "동료에게만 한 말", 5)
+    store.add_message(sid, "lead_dm", "candidate", "팀장에게만 한 말", 5)
+    store.add_message(sid, "work", "candidate", "혼자 쓴 업무 메모", 5)
     store.add_message(sid, "team", "candidate", "팀 채널 메시지", 6)
-    asyncio.run(persona.speak("lead", sid, 7, "답하라", ("team", "dm", "system")))
-    assert "팀 채널 메시지" in seen["human"] and "비밀 1:1 메시지" not in seen["human"]
+    asyncio.run(persona.speak("lead", sid, 7, "답하라", ("team", "dm", "lead_dm", "work", "system")))
+    assert "팀 채널 메시지" in seen["human"] and "팀장에게만" in seen["human"]
+    assert "동료에게만" not in seen["human"] and "업무 메모" not in seen["human"]
+    asyncio.run(persona.speak("coworker", sid, 7, "답하라"))
+    assert "동료에게만" in seen["human"] and "팀장에게만" not in seen["human"] and "업무 메모" not in seen["human"]
 
 
-# 회귀: 지원자가 동료 아이디어에 동의하면 동료가 그걸 지원자 의견처럼 칭찬했다 → 동료 자신의 공유분을 맥락에 밝힌다
-def test_coworker_knows_its_own_shared_work(monkeypatch):
+# 동료의 숨은 사정(다른 업무에 차출됨)은 털어놓는 장면 전후로 지시문이 바뀐다(context_before / context_after)
+def test_coworker_hidden_fact_changes_after_reveal(monkeypatch):
     from app import persona
     seen = {}
 
@@ -114,11 +119,16 @@ def test_coworker_knows_its_own_shared_work(monkeypatch):
         return {"text": "ok", "verdicts": [], "read_titles": []}
     monkeypatch.setattr(persona.speak_graph, "speak", fake_speak)
     sid = store.create_session("x")
-    store.upsert_part(sid, "coworker:3", "7일 출석 보상: 확률형 전설 상자", 90)
-    asyncio.run(persona.speak("coworker", sid, 115, "답하라", ("team", "dm", "system")))
-    assert "네가 공유한 작업" in seen["system"] and "확률형 전설 상자" in seen["system"]
-    asyncio.run(persona.speak("lead", sid, 115, "답하라", ("team", "dm", "system")))
-    assert "네가 공유한 작업" not in seen["system"]
+    asyncio.run(persona.speak("coworker", sid, 5, "답하라"))
+    assert "아직 지원자에게 말하지 않았다" in seen["system"]
+    store.claim_scene(sid, "coworker_miss", 15)
+    asyncio.run(persona.speak("coworker", sid, 16, "답하라"))
+    assert "이미 지원자에게 털어놓았다" in seen["system"] and "아직 지원자에게 말하지" not in seen["system"]
+    asyncio.run(persona.speak("lead", sid, 16, "답하라"))
+    assert "차출" not in seen["system"]                       # 팀장은 동료 사정을 모른다(지원자가 알려야 함)
+    store.claim_scene(sid, "pivot", 22)
+    asyncio.run(persona.speak("lead", sid, 23, "답하라"))
+    assert "3개월 이상" in seen["system"]                     # 대상 변경 뒤에만 '오래'의 기준을 안다
 
 
 # 세션은 끝났는데(완료) 리포트 작업이 시작되기 전에 서버가 멈춘 경우도 재시작 때 만든다(F-32)
@@ -134,38 +144,27 @@ def test_completed_session_without_report_is_generated_on_startup(monkeypatch):
     assert store.get_session(sid)["status"] == "report_ready"
 
 
-# 회귀: "다시 검토해야 할 것 같아요" 같은 하소연을 검토 요청으로 잡아 동료가 말에 답하지 않고 리뷰만 했다
-def test_review_request_needs_request_form():
-    from app import persona
-    assert not persona.is_review_request("대상 유저가 바뀌어서 처음부터 다시 검토해야 할 것 같습니다 ㅠㅠ")
-    assert not persona.is_review_request("피드백 반영해서 고쳐 볼게요")
-    assert not persona.is_review_request("2번 보완해서 다시 올릴게요")
-    assert persona.is_review_request("기획안 검토해 주실 수 있나요?")
-    assert persona.is_review_request("한번 봐주세요")
-    assert persona.is_review_request("리뷰 부탁드려요")
-
-
-# 회귀: 지원자가 먼저 분담을 물어 동료가 분담안을 말했는데, 00:10 장면이 같은 분담안을 또 말했다
+# 회귀: 지원자가 먼저 분담을 물어 동료가 분담안을 말했는데, 분업 장면이 같은 분담안을 또 말했다
 def test_negotiate_scene_does_not_repeat_split(monkeypatch):
     from app import graph, persona
     seen = {}
 
-    async def fake_speak(role, sid, minute, task, channels, **kw):
+    async def fake_speak(role, sid, minute, task, channels=None, **kw):
         seen.update(task=task, must_include=kw.get("must_include"))
         return "ok"
     monkeypatch.setattr(persona, "speak", fake_speak)
     sid = store.create_session("x")
-    state = {"session_id": sid, "minute": 10, "scenario": "moarun", "assignment": {},
+    state = {"session_id": sid, "minute": 2, "scenario": "moarun", "assignment": {},
              "trigger": {"kind": "scene", "scene_id": "negotiate"}}
     asyncio.run(graph.run_scene(state))
     assert seen["must_include"]                                       # 처음이면 분담안을 그대로 전달
-    store.add_message(sid, "dm", "coworker", "1번·2번은 지원자님, 3번은 함께, 4번·5번은 제가 맡을게요", 7)
+    store.add_message(sid, "dm", "coworker", "1번·2번, 5번은 지원자님이, 3번·4번은 제가 맡을게요", 1)
     asyncio.run(graph.run_scene(state))
     assert seen["must_include"] is None and "다시 나열하지 말고" in seen["task"]
 
 
 # 회귀: 인터뷰 요약이 01:05에 공개돼도 알림이 없어 팀장이 "늦게 공유될 예정"이라고 답했다
-def test_delayed_doc_release_is_announced_once():
+def test_delayed_doc_release_is_announced_once(late_interviews):
     from app import engine
     sid = store.create_session("x")
     engine.announce_shared_docs(sid, 60)
@@ -177,7 +176,7 @@ def test_delayed_doc_release_is_announced_once():
 
 
 # 회귀: 지원자가 00:10 전에 분담을 꺼내 동의했는데 분업 단계 전이라 동의로 처리되지 않았고,
-# 00:10 장면과 00:30 확정 메시지로 분담안이 세 번 나갔다 → 그때 분업 장면을 시작한다
+# 분업 장면과 첫 이벤트 전 확정 메시지로 분담안이 세 번 나갔다 → 그때 분업 장면을 시작한다
 def test_candidate_can_start_split_before_scene(monkeypatch):
     from app import engine, graph
     triggers = []

@@ -1,6 +1,6 @@
 "use client";
-// 가상 오피스: 메신저(F-12) · 공유 문서(F-13) · 태스크 보드(F-14) · 회사 문서(F-15)
-//            · AI 어시스턴트(F-16) · 남은 시간·제출(F-17)
+// 가상 오피스: 메신저(팀 채널 · 동료 1:1 · 팀장 1:1) · 업무(업무 목록 · 업무 기록 · 작업 계속하기) · 회사 문서 · 남은 시간
+// 업무는 직접 하지 않는다: 다음 몇 분 동안 할 일을 짧게 적으면 정해진 지문이 이어지고 시간이 넘어간다(능력이 아니라 태도를 봄).
 // 서버에 poll_interval_seconds마다 /poll을 불러 새 메시지와 상태를 받는다.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Msg } from "@/lib/api";
@@ -8,37 +8,40 @@ import { api, Msg } from "@/lib/api";
 type Task = { part: string; title: string; owner: string; status: string };
 type Poll = {
   minute: number; remaining: number; status: string; time: string; phase: string;
-  messages: Msg[]; tasks: Task[]; my_parts: Record<string, string>;
-  coworker_parts: Record<string, string>; docs: { id: string; title: string }[];
-  part_titles: Record<string, string>; poll_interval_seconds: number; time_scale: number;
+  messages: Msg[]; tasks: Task[]; docs: { id: string; title: string }[];
+  progress: Record<string, { done: number; units: number; visible: boolean }>; can_finish: boolean;
+  work_intro: string; memo_max_chars: number;
+  poll_interval_seconds: number; time_scale: number;
   activity: { actor: string; label: string; node: string }[];
   names: Record<string, string>;
   pack: { company: string; task_title: string; coworker_name: string; coworker_short: string; lead_name: string; lead_short: string };
 };
+type Tab = "team" | "dm" | "lead_dm";
 
-const SAVE_DELAY_MS = 1000; // 입력이 멈춘 뒤 자동 저장까지 기다리는 시간(UI 반응성용)
+// 탭 → 화면에 보일 채널. 시스템 알림은 팀 채널에 함께 보인다.
+const TAB_CHANNELS: Record<Tab, string[]> = { team: ["team", "system"], dm: ["dm"], lead_dm: ["lead_dm"] };
+// 탭 → 답하는 사람(입력 중 표시용). 팀 채널은 이름을 부르지 않으면 팀장이 답한다.
+const TAB_ACTOR: Record<Tab, string> = { team: "lead", dm: "coworker", lead_dm: "lead" };
 
 function mmss(minutes: number) {
   const s = Math.max(0, Math.round(minutes * 60));
-  return `${String(Math.floor(s / 3600)).padStart(1, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
 export default function Office({ token, onEnd }: { token: string; onEnd: () => void }) {
   const [state, setState] = useState<Poll | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [tab, setTab] = useState<"team" | "dm">("team");
+  const [tab, setTab] = useState<Tab>("team");
+  const [seen, setSeen] = useState<Record<Tab, number>>({ team: 0, dm: 0, lead_dm: 0 });  // 탭별 마지막으로 본 메시지 id
   const [draft, setDraft] = useState("");
-  const [askDraft, setAskDraft] = useState("");
+  const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState(false);
-  const [parts, setParts] = useState<Record<string, string>>({});
+  const [working, setWorking] = useState(false);
   const [doc, setDoc] = useState<{ title: string; body: string } | null>(null);
   const [error, setError] = useState("");
   const lastId = useRef(0);
   const synced = useRef<{ remaining: number; at: number; scale: number } | null>(null);
   const [shown, setShown] = useState<number | null>(null);   // 화면에 보이는 남은 시간(분)
-  const loadedParts = useRef(false);
-  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const poll = useCallback(async () => {
     try {
@@ -47,11 +50,10 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
         lastId.current = p.messages[p.messages.length - 1].id;
         // 요청이 겹쳐 같은 메시지를 두 번 받아도 id로 한 번만 보여준다
         setMessages((prev) => {
-          const seen = new Set(prev.map((m) => m.id));
-          return [...prev, ...p.messages.filter((m) => !seen.has(m.id))];
+          const ids = new Set(prev.map((m) => m.id));
+          return [...prev, ...p.messages.filter((m) => !ids.has(m.id))];
         });
       }
-      if (!loadedParts.current) { setParts(p.my_parts); loadedParts.current = true; }  // 이어하기 시 복원
       setState(p);
       synced.current = { remaining: p.remaining, at: Date.now(), scale: p.time_scale };
       setShown(p.remaining);
@@ -78,6 +80,12 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
     return () => clearInterval(t);
   }, []);
 
+  // 지금 보고 있는 탭의 메시지는 읽은 것으로 표시한다
+  useEffect(() => {
+    const last = messages.filter((m) => TAB_CHANNELS[tab].includes(m.channel)).at(-1);
+    if (last && last.id > seen[tab]) setSeen((s) => ({ ...s, [tab]: last.id }));
+  }, [messages, tab, seen]);
+
   async function send() {
     if (!draft.trim()) return;
     setBusy(true);
@@ -89,37 +97,15 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
     setBusy(false);
   }
 
-  async function ask() {
-    if (!askDraft.trim()) return;
-    setAsking(true);
+  async function work() {
+    if (!memo.trim()) return;
+    setWorking(true);
     try {
-      await api(`/invite/${token}/assistant`, { method: "POST", body: JSON.stringify({ text: askDraft }) });
-      setAskDraft("");
+      await api(`/invite/${token}/work`, { method: "POST", body: JSON.stringify({ text: memo }) });
+      setMemo("");
       await poll();
     } catch (e) { setError((e as Error).message); }
-    setAsking(false);
-  }
-
-  const pending = useRef<Record<string, string>>({});   // 아직 저장 안 된 입력
-
-  function savePart(part: string, content: string) {
-    delete pending.current[part];
-    return api(`/invite/${token}/parts/${part}`, { method: "PUT", body: JSON.stringify({ content }) })
-      .catch((e) => setError(e.message));
-  }
-
-  function editPart(part: string, content: string) {
-    setParts((p) => ({ ...p, [part]: content }));
-    pending.current[part] = content;
-    clearTimeout(saveTimers.current[part]);
-    saveTimers.current[part] = setTimeout(() => savePart(part, content), SAVE_DELAY_MS);
-  }
-
-  async function setTask(part: string, status: string) {
-    try {
-      await api(`/invite/${token}/tasks/${part}`, { method: "PUT", body: JSON.stringify({ status }) });
-      await poll();
-    } catch (e) { setError((e as Error).message); }
+    setWorking(false);
   }
 
   async function openDoc(id: string) {
@@ -127,37 +113,43 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
   }
 
   async function submit() {
-    if (!confirm("기획안을 제출하고 세션을 끝낼까요?")) return;
-    // 자동 저장을 기다리지 않고, 남은 입력을 먼저 저장한 뒤 제출한다(마지막 수정 누락 방지)
-    Object.values(saveTimers.current).forEach(clearTimeout);
-    await Promise.all(Object.entries(pending.current).map(([part, content]) => savePart(part, content)));
-    await api(`/invite/${token}/submit`, { method: "POST" });
-    onEnd();
+    if (!confirm("업무를 마치고 세션을 끝낼까요?")) return;
+    try {
+      await api(`/invite/${token}/submit`, { method: "POST" });
+      onEnd();
+    } catch (e) { setError((e as Error).message); }
   }
 
   if (!state) return <main className="page muted">오피스에 입장하는 중…</main>;
-  const chat = messages.filter((m) => (tab === "team" ? ["team", "system"] : ["dm"]).includes(m.channel));
-  const assistantLog = messages.filter((m) => m.channel === "assistant");
-  const STATUS: Record<string, string> = { todo: "할 일", doing: "진행 중", done: "완료" };
+  const chat = messages.filter((m) => TAB_CHANNELS[tab].includes(m.channel));
+  const workLog = messages.filter((m) => m.channel === "work");
+  const unread = (t: Tab) => messages.filter((m) => TAB_CHANNELS[t].includes(m.channel)
+    && m.sender !== "candidate" && m.id > seen[t]).length;
   // 이름은 세션의 시나리오 팩에서 온다(회사마다 등장인물이 다름)
   const N: Record<string, string> = { ...state.names, candidate: "나" };
-  const INITIAL: Record<string, string> = { candidate: "나", coworker: state.pack.coworker_short,
-    lead: state.pack.lead_short, assistant: "AI" };
+  const INITIAL: Record<string, string> = { candidate: "나", coworker: state.pack.coworker_short, lead: state.pack.lead_short };
+  const TAB_LABEL: Record<Tab, string> = { team: "# 팀 채널", dm: `${state.pack.coworker_name} 1:1`, lead_dm: `${state.pack.lead_name} 팀장 1:1` };
+  const actor = TAB_ACTOR[tab];
+  const STATUS: Record<string, string> = { todo: "할 일", doing: "진행 중", done: "완료" };
 
   return (
     <div className="office">
       <div className="topbar">
         <span className="row"><span className="logo">Day <span>Zer0</span></span>
           <span className="muted">{state.pack.company} · {state.pack.task_title}</span></span>
-        <span className="row">남은 시간 <span className={`timer ${(shown ?? state.remaining) < 10 ? "low" : ""}`}>{mmss(shown ?? state.remaining)}</span></span>
-        <button onClick={submit}>기획안 제출</button>
+        <span className="row">남은 시간 <span className={`timer ${(shown ?? state.remaining) < 5 ? "low" : ""}`}>{mmss(shown ?? state.remaining)}</span></span>
+        <button onClick={submit} disabled={!state.can_finish}
+          title={state.can_finish ? "" : "팀장님이 보고를 요청한 뒤에 마칠 수 있어요"}>업무 마치기</button>
       </div>
 
       {/* 메신저 */}
       <section className="col">
         <div className="tabs">
-          <button className={tab === "team" ? "active" : ""} onClick={() => setTab("team")}># 팀 채널</button>
-          <button className={tab === "dm" ? "active" : ""} onClick={() => setTab("dm")}>{state.pack.coworker_name} · 1:1</button>
+          {(["team", "dm", "lead_dm"] as Tab[]).map((t) => (
+            <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+              {TAB_LABEL[t]}{tab !== t && unread(t) > 0 && <span className="unread">{unread(t)}</span>}
+            </button>
+          ))}
         </div>
         <div className="chat">
           {chat.length === 0 && <div className="typing">아직 메시지가 없어요.</div>}
@@ -167,83 +159,72 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
             <Bubble key={m.id} m={m} names={N} initials={INITIAL} />
           ))}
           {/* 진행 이벤트: 서버가 알려 주는 AI의 현재 작업(Graph 노드) */}
-          {state.activity.filter((a) => a.actor === (tab === "dm" ? "coworker" : "lead")).map((a) => (
+          {state.activity.filter((a) => a.actor === actor).map((a) => (
             <div key={a.actor} className="typing">{N[a.actor]}님이 {a.label}…</div>
           ))}
-          {busy && !state.activity.some((a) => a.actor === (tab === "dm" ? "coworker" : "lead")) && (
-            <div className="typing">{tab === "dm" ? N.coworker : N.lead}님이 입력 중…</div>
+          {busy && !state.activity.some((a) => a.actor === actor) && (
+            <div className="typing">답장을 기다리는 중…</div>
           )}
         </div>
         <div className="composer">
           <textarea rows={2} value={draft} onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
-            placeholder={tab === "team" ? "팀 채널에 메시지 (Enter 전송, Shift+Enter 줄바꿈)" : `${N.coworker}에게 메시지`} />
+            placeholder={`${TAB_LABEL[tab]}에 메시지 (Enter 전송, Shift+Enter 줄바꿈)`} />
           <button onClick={send} disabled={busy}>보내기</button>
         </div>
         {error && <div className="error" onClick={() => setError("")}>{error}</div>}
       </section>
 
-      {/* 공유 문서: 기획안 5파트 */}
+      {/* 업무: 업무 목록 · 업무 기록 · 작업 계속하기 */}
       <section className="col">
-        <div><h2 style={{ marginBottom: 2 }}>공유 문서 · 기획안</h2>
-          <span className="muted small">입력하면 자동 저장됩니다. 편집은 나만 할 수 있고, {N.coworker}·팀장은 읽을 수 있어요. 동료가 공유한 내용은 파란 상자로 보여요.</span></div>
-        {Object.entries(state.part_titles).map(([part, title]) => {
-          const owner = state.tasks.find((t) => t.part === part)?.owner ?? "candidate";
-          return (
-            <div className="part" key={part}>
-              <h3>{part}. {title} <span className={`owner ${owner}`}>{N[owner]}</span></h3>
-              <textarea rows={4} value={parts[part] ?? ""} onChange={(e) => editPart(part, e.target.value)}
-                placeholder="여기에 작성하세요." />
-              {state.coworker_parts[part] ? (
-                <div className="shared"><b>{N.coworker} 공유</b>{"\n"}{state.coworker_parts[part]}</div>
-              ) : owner !== "candidate" && (
-                <div className="muted small" style={{ marginTop: 6 }}>
-                  {N.coworker} 담당 · 작업 중이에요. 완성되면 여기에 공유돼요.
-                </div>
-              )}
-            </div>
-          );
-        })}
+        <div className="notice small">{state.work_intro}</div>
+        <div className="panel">
+          <h2>업무 목록</h2>
+          {state.tasks.map((t) => {
+            const p = state.progress[t.part];
+            return (
+              <div className="task" key={t.part}>
+                <span>{t.part}. {t.title} <span className={`owner ${t.owner}`}>{N[t.owner]}</span></span>
+                {p && p.visible ? (
+                  <span className="cells" title={`${p.done}/${p.units}칸`}>
+                    {Array.from({ length: p.units }, (_, i) => <i key={i} className={i < p.done ? "on" : ""} />)}
+                    <span className="muted small">{p.done}/{p.units}</span>
+                  </span>
+                ) : <span className="badge">{STATUS[t.status]}</span>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="panel work-panel">
+          <h2 style={{ marginBottom: 0 }}>업무 기록</h2>
+          <div className="chat">
+            {workLog.length === 0 && <div className="typing">아직 업무 기록이 없어요. 아래에 다음에 할 일을 적어 보세요.</div>}
+            {workLog.map((m) => m.sender === "candidate" ? (
+              <div key={m.id} className="memo"><span className="time">{m.time}</span> 나의 메모: {m.content}</div>
+            ) : (
+              <div key={m.id} className="narration"><span className="time">{m.time}</span> {m.content}</div>
+            ))}
+          </div>
+          <div className="composer">
+            <textarea rows={2} value={memo} maxLength={state.memo_max_chars}
+              onChange={(e) => setMemo(e.target.value)}
+              placeholder={`다음 몇 분 동안 무엇을 할지 짧게 적어 주세요 (${state.memo_max_chars}자 이내)`} />
+            <button onClick={work} disabled={working || !memo.trim()}>작업 계속하기</button>
+          </div>
+          <span className="muted small">{memo.length}/{state.memo_max_chars}자 · 누르면 적은 업무 하나가 한 칸 오르고 시간이 몇 분 넘어가요</span>
+        </div>
       </section>
 
-      {/* 보드 · 문서 · 어시스턴트 */}
+      {/* 회사 문서 */}
       <section className="col">
         <div className="panel">
-          <h2>태스크 보드</h2>
-          {state.tasks.map((t) => (
-            <div className="task" key={t.part}>
-              <span>{t.part}. {t.title} <span className={`owner ${t.owner}`}>{N[t.owner]}</span></span>
-              {["candidate", "both"].includes(t.owner) ? (
-                <select value={t.status} onChange={(e) => setTask(t.part, e.target.value)} style={{ width: 96 }}>
-                  <option value="todo">할 일</option><option value="doing">진행 중</option><option value="done">완료</option>
-                </select>
-              ) : <span className="badge">{STATUS[t.status]}</span>}
-            </div>
-          ))}
-        </div>
-        <div className="panel">
           <h2>회사 문서</h2>
-          <div className="doc-chips">
+          <span className="muted small">배경 자료예요. 업무 내용을 직접 쓸 필요는 없어요.</span>
+          <div className="doc-chips" style={{ marginTop: 8 }}>
             {state.docs.map((d) => <button key={d.id} className="chip" onClick={() => openDoc(d.id)}>{d.title}</button>)}
           </div>
           {doc && <div className="doc-body"><div className="row" style={{ justifyContent: "space-between" }}><b>{doc.title}</b>
             <button className="ghost" onClick={() => setDoc(null)}>닫기</button></div>{doc.body}</div>}
-        </div>
-        <div className="panel assistant-panel">
-          <div><h2 style={{ marginBottom: 0 }}>AI 어시스턴트</h2>
-            <span className="muted small">업무용 도구 · 회사 문서를 참고해 답해요</span></div>
-          <div className="chat">
-            {assistantLog.length === 0 && <div className="typing">질문, 요약, 초안 작성을 요청해 보세요.</div>}
-            {assistantLog.map((m) => <Bubble key={m.id} m={m} names={N} initials={INITIAL} />)}
-            {state.activity.filter((a) => a.actor === "assistant").map((a) => (
-              <div key={a.actor} className="typing">AI 어시스턴트가 {a.label}…</div>
-            ))}
-            {asking && !state.activity.some((a) => a.actor === "assistant") && <div className="typing">답변 작성 중…</div>}
-          </div>
-          <div className="composer">
-            <textarea rows={2} value={askDraft} onChange={(e) => setAskDraft(e.target.value)} placeholder="예: 지표 현황 요약해 줘" />
-            <button onClick={ask} disabled={asking}>요청</button>
-          </div>
         </div>
       </section>
     </div>

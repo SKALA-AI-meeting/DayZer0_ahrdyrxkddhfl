@@ -1,0 +1,142 @@
+# 홀드아웃 평가셋: 체크 정의를 고칠 때 보지 않은 사례(과적합 확인용). 결과를 보고 이 파일이나 체크 정의를 고치지 않는다.
+# 형식은 cases.toml과 같다. 실행: uv run python eval/run_eval.py 3 holdout → eval/results_holdout.md
+
+# ---------------------------------------------------------------- H1. 꼼꼼하지만 혼자 떠안는 사례
+[[case]]
+name = "H1 혼자 떠안는 사례"
+messages = [
+  { minute = 3, channel = "dm", text = "4번은 1번 결과 보고 정하는 게 좋겠어요. 그리고 마감 전에 서로 확인할 시간을 한 번 잡아요, 12분 어때요?" },
+  { minute = 16, channel = "dm", text = "아 그랬군요. 그럼 남은 거 다 제가 할게요, 신경 쓰지 마세요." },
+  { minute = 21, channel = "lead_dm", text = "네 괜찮아요, 제가 다 맡아서 하고 있어요." },
+  { minute = 23, channel = "lead_dm", text = "혹시 오래라는 게 반년 이상인가요?" },
+  { minute = 24, channel = "work", text = "새 대상 기준으로 1번부터 다시" },
+  { minute = 33, channel = "lead_dm", text = "3번이랑 4번은 아직이에요. 제가 시간 배분을 못 했어요." },
+]
+[case.expected."계획성·꼼꼼함"]
+clarified_scope = false
+set_checkpoint = true
+set_timebox = false
+[case.expected."협업·조율"]
+proposed_adjustment = false
+asked_situation = true
+redistributed = true
+blamed = false
+[case.expected."책임감·성실성"]
+escalated = false
+recovery_plan = true
+[case.expected."적응성·유연성"]
+asked_criteria = true
+renegotiated = false
+shared_change = false
+replanned_in_memo = true
+[case.expected."정직·공정한 보고"]
+disclosed_incomplete = true
+fair_about_coworker = false
+overclaimed = false
+
+# ---------------------------------------------------------------- H2. 공격적인 사례
+[[case]]
+name = "H2 공격적인 사례"
+skipped = ["lead_checkin"]
+messages = [
+  { minute = 3, channel = "dm", text = "아니 왜 재밌는 건 도현님이 다 가져가요? 3번은 제가 할게요." },
+  { minute = 16, channel = "dm", text = "이럴 줄 알았어요. 처음부터 제대로 하셨어야죠." },
+  { minute = 17, channel = "lead_dm", text = "팀장님, 도현님이 일을 안 해서 프로젝트가 망하게 생겼어요." },
+  { minute = 23, channel = "lead_dm", text = "그건 무리예요." },
+  { minute = 33, channel = "lead_dm", text = "제 파트 빼고는 다 안 됐어요. 도현님이 안 했거든요." },
+]
+[case.expected."계획성·꼼꼼함"]
+clarified_scope = false
+set_checkpoint = false
+set_timebox = false
+[case.expected."협업·조율"]
+proposed_adjustment = true
+asked_situation = false
+redistributed = false
+blamed = true
+[case.expected."책임감·성실성"]
+escalated = true
+recovery_plan = false
+[case.expected."적응성·유연성"]
+asked_criteria = false
+renegotiated = false
+shared_change = false
+replanned_in_memo = false
+[case.expected."정직·공정한 보고"]
+disclosed_incomplete = true
+fair_about_coworker = false
+overclaimed = false
+
+# ---------------------------------------------------------------- H3. 조용히 성실한 사례 (중간 점검으로 일찍 알게 됨)
+[[case]]
+name = "H3 조용히 성실한 사례"
+scene_minutes = { coworker_miss = 12, pivot = 14.5 }
+skipped = ["lead_checkin"]
+messages = [
+  { minute = 3, channel = "dm", text = "네, 그런데 일정은 어떻게 할까요? 각자 언제까지 끝낼지 정해요." },
+  { minute = 6, channel = "work", text = "1번 지표 정리" },
+  { minute = 11, channel = "work", text = "2번 인터뷰 정리, 끝나면 도현님께 공유" },
+  { minute = 11.9, channel = "dm", text = "도현님, 인터뷰 정리 공유드려요. 3번 진행은 어떠세요?" },
+  { minute = 12.5, channel = "dm", text = "급하게 불려 가셨으면 어쩔 수 없죠. 3번은 제가 간단히 볼게요." },
+  { minute = 13, channel = "lead_dm", text = "팀장님, 3·4번 쪽에 공백이 생겨서 3번은 제가 일부 맡고 4번은 축소하려고 합니다." },
+  { minute = 14, channel = "lead_dm", text = "괜찮을까요?" },
+  { minute = 15, channel = "lead_dm", text = "알겠습니다. 3개월 이상인지 6개월 이상인지 기준만 알려 주세요." },
+  { minute = 16, channel = "dm", text = "도현님, 대상이 장기 미참여 사용자로 바뀌었어요." },
+  { minute = 17, channel = "work", text = "바뀐 대상에 맞춰 4번 축소" },
+  { minute = 33, channel = "lead_dm", text = "1·2번은 끝났고 3번은 절반, 4번은 축소했습니다. 도현님은 급한 업무에 차출되셨어요." },
+]
+[case.expected."계획성·꼼꼼함"]
+clarified_scope = false
+set_checkpoint = true
+set_timebox = true
+[case.expected."협업·조율"]
+proposed_adjustment = false
+asked_situation = true
+redistributed = true
+blamed = false
+[case.expected."책임감·성실성"]
+escalated = true
+recovery_plan = true
+[case.expected."적응성·유연성"]
+asked_criteria = true
+renegotiated = false
+shared_change = true
+replanned_in_memo = true
+[case.expected."정직·공정한 보고"]
+disclosed_incomplete = true
+fair_about_coworker = true
+overclaimed = false
+
+# ---------------------------------------------------------------- H4. 다 됐다고 우기는 사례
+[[case]]
+name = "H4 다 됐다고 하는 사례"
+messages = [
+  { minute = 3, channel = "dm", text = "좋습니다! 보고 형식은 팀장님께 여쭤볼게요." },
+  { minute = 4, channel = "lead_dm", text = "팀장님, 보고는 어느 정도 깊이로 준비하면 될까요?" },
+  { minute = 16, channel = "dm", text = "괜찮아요, 그럴 수 있죠." },
+  { minute = 21, channel = "lead_dm", text = "도현님이 다른 업무로 빠지셔서 조금 늦어지고 있어요." },
+  { minute = 23, channel = "dm", text = "도현님 대상이 오래 안 나온 분들로 바뀐대요." },
+  { minute = 33, channel = "lead_dm", text = "네 다 끝났습니다!" },
+  { minute = 34, channel = "lead_dm", text = "도현님은 급한 업무로 빠지셨지만 제가 다 메웠어요." },
+]
+[case.expected."계획성·꼼꼼함"]
+clarified_scope = true
+set_checkpoint = false
+set_timebox = false
+[case.expected."협업·조율"]
+proposed_adjustment = false
+asked_situation = true
+redistributed = false
+blamed = false
+[case.expected."책임감·성실성"]
+escalated = true
+recovery_plan = false
+[case.expected."적응성·유연성"]
+asked_criteria = false
+renegotiated = false
+shared_change = true
+replanned_in_memo = false
+[case.expected."정직·공정한 보고"]
+disclosed_incomplete = false
+fair_about_coworker = true
+overclaimed = true

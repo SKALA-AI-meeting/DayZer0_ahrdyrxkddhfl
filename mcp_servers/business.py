@@ -1,7 +1,6 @@
 """business-mcp: 세션·태스크 업무 데이터 MCP 서버 (직접 구축, stdio).
 
-- 조회 도구: get_session_status, list_tasks, read_shared_plan(동료·팀장이 기획안 읽기)
-- 조회 도구: list_observations
+- 조회 도구: get_session_status, list_tasks, list_observations, list_work_log(업무 메모·지문)
 - 변경 도구: assign_tasks, update_task_status, save_observation (destructiveHint로 표시)
 
 PRD 부록은 gateway 내부 API를 거치지만, MVP는 같은 SQLite 파일을 직접 읽는다(README에 기록).
@@ -38,16 +37,11 @@ def list_tasks(session_id: str) -> list[dict]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-def read_shared_plan(session_id: str) -> dict:
-    """공유 문서(기획안)를 읽는다. 파트별 담당자, 지원자가 쓴 내용, 동료가 공유한 내용을 반환한다.
-
-    동료·팀장이 지원자의 기획안을 보고 피드백할 때 쓴다(읽기 전용, 편집은 지원자만).
-    """
-    s = store.get_session(session_id)
-    parts = store.get_parts(session_id)
-    return {"parts": [{"part": p, "title": t["title"], "owner": s["assignment"].get(p, ""),
-                       "candidate_text": parts.get(p, ""), "coworker_text": parts.get(f"coworker:{p}", "")}
-                      for p, t in ((t["part"], t) for t in store.list_tasks(session_id))]}
+def list_work_log(session_id: str) -> list[dict]:
+    """업무 기록(지원자의 업무 메모와 그 결과 지문)을 시각 순으로 반환한다. 리포트·검토용(읽기 전용)."""
+    store.get_session(session_id)
+    return [{"time": clock.format_minute(m["minute"]), "sender": m["sender"], "content": m["content"]}
+            for m in store.list_messages(session_id, channels=("work",))]
 
 
 @mcp.tool(annotations=CHANGE)

@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from app import auth, clock, doc_graph, engine, progress, report, settings, store
+from app import auth, clock, doc_graph, engine, progress, report, settings, store, work
 from app import docs as docs_module
 from app import mcp_client
 
@@ -174,14 +174,6 @@ class TextIn(BaseModel):
     text: str
 
 
-class PartIn(BaseModel):
-    content: str
-
-
-class TaskIn(BaseModel):
-    status: str
-
-
 def _msg(m: dict) -> dict:
     return {"id": m["id"], "channel": m["channel"], "sender": m["sender"], "content": m["content"],
             "time": clock.format_minute(m["minute"])}
@@ -219,19 +211,20 @@ async def start(token: str) -> dict:
 
 @app.get("/api/invite/{token}/poll")
 async def poll(token: str, after: int = 0) -> dict:
-    """화면이 2초마다 부른다. 시계를 돌리고 새 메시지·보드·문서 상태를 돌려준다."""
+    """화면이 2초마다 부른다. 시계를 돌리고 새 메시지·업무 목록·문서 상태를 돌려준다."""
     s = _candidate(token, need_active=False)
     if s["status"] == "invited":
         raise HTTPException(400, "아직 시작하지 않았습니다.")
     state = await engine.tick(s["id"])
     s = store.get_session(s["id"])
-    parts = store.get_parts(s["id"])
     return {
         **state, "time": clock.format_minute(state["minute"]), "phase": s["phase"],
         "messages": [_msg(m) for m in store.list_messages(s["id"], after_id=after)],
         "tasks": store.list_tasks(s["id"]),
-        "my_parts": {k: v for k, v in parts.items() if k in settings.PART_IDS},
-        "coworker_parts": {k.split(":")[1]: v for k, v in parts.items() if k.startswith("coworker:")},
+        "progress": _progress_view(s),
+        "can_finish": engine.can_finish(s["id"]),
+        "work_intro": settings.work_spec(s["scenario"])["intro"],
+        "memo_max_chars": settings.config()["work"]["memo_max_chars"],
         "docs": [{"id": d["id"], "title": d["title"]}
                  for d in docs_module.available(s["company"], state["minute"], s["scenario"])],
         "part_titles": settings.part_titles(s["scenario"]),
@@ -243,9 +236,19 @@ async def poll(token: str, after: int = 0) -> dict:
     }
 
 
+def _progress_view(s: dict) -> dict:
+    """업무 번호 → {done, units, visible}. 동료가 맡은 업무는 지원자가 메운 칸이 있을 때만 진척을 보인다.
+
+    동료 진척(늘 0)을 그대로 보이면 보드만 봐도 동료가 일을 못 하는 게 드러나, 진행 상황을 묻는 행동을 볼 수 없다.
+    """
+    done, need = work.progress(s["id"], s["scenario"]), work.units(s["scenario"])
+    return {p: {"done": done[p], "units": need[p],
+                "visible": s["assignment"].get(p) != "coworker" or done[p] > 0} for p in need}
+
+
 @app.post("/api/invite/{token}/messages")
 async def send(token: str, body: MessageIn) -> dict:
-    """메신저(F-12): 팀 채널(team) 또는 동료 1:1(dm)."""
+    """메신저(F-12): 팀 채널(team), 동료 1:1(dm), 팀장 1:1(lead_dm)."""
     s = _candidate(token)
     try:
         await engine.send_message(s["id"], body.channel, body.text.strip())
@@ -254,39 +257,14 @@ async def send(token: str, body: MessageIn) -> dict:
     return {"ok": True}
 
 
-@app.post("/api/invite/{token}/assistant")
-async def ask(token: str, body: TextIn) -> dict:
-    """AI 어시스턴트(F-16)."""
+@app.post("/api/invite/{token}/work")
+async def work_step(token: str, body: TextIn) -> dict:
+    """작업 계속하기: 업무 메모를 남기면 정해진 지문이 이어지고 시간이 넘어간다(업무는 직접 하지 않음)."""
     s = _candidate(token)
     try:
-        return {"answer": await engine.ask_assistant(s["id"], body.text.strip())}
-    except RuntimeError as exc:
+        return await engine.work_step(s["id"], body.text)
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(400, str(exc)) from exc
-
-
-@app.put("/api/invite/{token}/parts/{part}")
-def save_part(token: str, part: str, body: PartIn) -> dict:
-    """공유 문서 자동 저장(F-13)."""
-    s = _candidate(token)
-    try:
-        engine.save_part(s["id"], part, body.content)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return {"ok": True}
-
-
-@app.put("/api/invite/{token}/tasks/{part}")
-def set_task(token: str, part: str, body: TaskIn) -> dict:
-    """태스크 보드(F-14): 지원자는 자기 카드(지원자·함께) 상태만 바꿀 수 있다."""
-    s = _candidate(token)
-    owner = {t["part"]: t["owner"] for t in store.list_tasks(s["id"])}.get(part)
-    if owner not in ("candidate", "both"):
-        raise HTTPException(403, "자기 카드만 바꿀 수 있습니다.")
-    try:
-        store.set_task_status(s["id"], part, body.status)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return {"ok": True}
 
 
 @app.get("/api/invite/{token}/docs/{doc_id}")
@@ -302,26 +280,27 @@ async def read_doc(token: str, doc_id: str) -> dict:
         raise HTTPException(403, f"'{doc['title']}' 문서는 아직 공유되지 않았습니다.") from exc
     except LookupError as exc:
         raise HTTPException(404, "없는 문서입니다.") from exc
-    store.add_doc_view(s["id"], doc_id, clock.minute_of(s["sim_seconds"]))   # AI 결과 검증 관찰용 열람 기록
     return {"id": doc_id, "title": doc["title"], "body": body}
 
 
 @app.post("/api/invite/{token}/submit")
 async def submit(token: str) -> dict:
-    """제출(F-17). 세션을 끝내고 리포트 생성을 시작한다(F-32)."""
+    """업무 마치기(F-17). 팀장의 보고 요청 뒤에만 가능하다. 세션을 끝내고 리포트 생성을 시작한다(F-32)."""
     s = _candidate(token)
+    if not engine.can_finish(s["id"]):
+        raise HTTPException(400, "팀장님이 보고를 요청한 뒤에 업무를 마칠 수 있어요.")
     engine.finish(s["id"])
     return {"ok": True}
 
 
 @app.get("/api/invite/{token}/debrief")
 def debrief(token: str) -> dict:
-    """디브리핑(F-18): 연출된 상황 4개와 리포트 처리 방식. 끝난 세션만 볼 수 있다."""
+    """디브리핑(F-18): 연출된 상황과 리포트 처리 방식. 끝난 세션만 볼 수 있다."""
     s = _candidate(token, need_active=False)
     if s["status"] in ("invited", "in_progress"):
         raise HTTPException(400, "평가가 끝난 뒤에 볼 수 있습니다.")
     events = [{"time": clock.format_minute(sc["at_minute"]), "element": sc["element"],
-               "message": sc["message"]} for sc in settings.scenes(s["scenario"]) if sc["element"]]
+               "message": sc["debrief"]} for sc in settings.scenes(s["scenario"]) if sc.get("debrief")]
     return {"events": events,
             "notice": "위 상황은 평가를 위해 연출된 것입니다. 리포트는 점수 없이 관찰 기록만 담아 "
                       "채용 담당자에게 전달되며, 최종 판단은 사람이 합니다."}

@@ -36,7 +36,7 @@ export const NAME: Record<string, string> = {
   coworker: "동료",
   lead: "팀장",
   system: "알림",
-  assistant: "AI 어시스턴트",
+  narrator: "업무 진행",
   both: "함께",
 };
 

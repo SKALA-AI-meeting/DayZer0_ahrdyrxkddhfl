@@ -1,86 +1,88 @@
-# 관찰 항목 정의 (하이브리드 B)
-# - 요소·상황·관찰 포인트는 PRD 5.3, 6.4 그대로다.
-# - 체크 항목은 모두 "행동"으로 정의한다 (말투·공손함 항목 금지, PRD 15장 평가 편향).
-# - window: 이벤트 시점부터 window_end_minute까지의 지원자 메시지·문서만 본다.
-#   책임감은 "마감 전에 먼저 알렸는가"를 보므로 마감(110분)까지 본다.
-#   유연성·존중·소통은 변경에 대한 반응·리뷰 답변이 마감 뒤에도 나올 수 있어 세션 끝(120분)까지 본다
-#   (PRD F-30 "이벤트마다 그 뒤의 지원자 메시지").
+# 관찰 항목 정의 (하이브리드 B) — 인성 포커스 버전, 역량 5개 (팀 결정 2026-10-20)
+# - 체크 항목은 모두 "행동"으로 정의한다 (말투·공손함·업무 결과물의 품질 항목 금지: 능력이 아니라 태도를 본다).
+# - scene: 관찰 구간의 시작 장면. 장면이 실제로 실행된 시각부터 window_end_minute까지의 지원자 메시지·업무 메모만 본다.
+#   window_end_scene: 그 장면이 window_end_minute보다 먼저 실행되면 거기서 구간을 끝낸다(예: 계획 단계는 동료 미이행 전까지).
 # - candidate_keywords: 관련 메시지 "후보"를 넓게 찾는 용도. 키워드만으로 확정하지 않는다.
 #   후보가 0개여도 LLM은 구간 전체 메시지를 본다(키워드 누락 대비).
 # - checks: LLM이 예/아니오 + 원문 인용으로 답한다. 인용은 코드가 실제 메시지와 대조해 검증한다.
-#   evidence_scope = "messages": 대화로만 할 수 있는 행동(알림·질문·제안)은 지원자 메시지에서만 근거를 인정한다.
-#   evidence_scope = "plan": 기획안에 적힌 내용만 근거로 인정한다.
-#   quote_must_contain: 인용에 이 말 중 하나가 있어야 그 행동의 근거로 인정한다(코드 검증).
-#   인용은 원문에 있지만 행동을 뒷받침하지 않는 경우(예: 하소연을 '확인 질문'으로 기록)를 막는다.
-#   목록이 넓으면 과장된 행동 문장이 통과하고, 좁으면 맞는 근거도 버려진다.
-#   quote_must_not_contain: 인용에 이 말(부정·제외 표현)이 있으면 근거로 인정하지 않는다(예: "(확률형x)"를 '확률형을 넣음'으로 읽는 실수).
+#   evidence_scope: messages = 지원자가 보낸 메시지만 / memo = 지원자의 업무 메모만 / all = 둘 다(기본)
+#   channels: 근거 메시지가 이 채널 중 하나여야 한다(예: 팀장에게 알렸는가 → lead_dm·team). 없으면 채널 제한 없음.
+#     team = 팀 채널(팀장도 봄), dm = 동료 1:1, lead_dm = 팀장 1:1, work = 업무 메모
+#   quote_must_contain: 인용에 이 말 중 하나가 있어야 그 행동의 근거로 인정한다(과장된 행동 문장 방지).
+#   quote_must_not_contain: 인용에 이 말(부정·제외 표현)이 있으면 근거로 인정하지 않는다(함의 검증으로 다시 본다).
 #   애매하면 버리는 쪽: 하지 않은 일을 했다고 적는 것보다 놓치는 쪽이 안전하다(PRD 9장 단정 금지).
-# - point: 리포트에서 근거 옆에 보이는 관찰 포인트(PRD 5.3·6.4). 해당한 포인트만 보이고 해당하지 않은 목록·개수는 보이지 않는다.
-# - 결과는 내부용이며, 리포트에는 "관찰된 행동 + 근거 원문"만 보인다(개수·점수 표시 없음).
+# - point: 리포트에서 근거 옆에 보이는 관찰 포인트. 해당한 포인트만 보이고 해당하지 않은 목록·개수는 보이지 않는다.
+# - rules: LLM 없이 기록만으로 확정하는 관찰(app/observe.py RULES). 예: 팀장이 묻기 전에 먼저 연락했는가.
+# - direction: positive(바람직한 행동, 기본) | negative(반대 방향 행동: 동료 탓, 다 된 것처럼 보고).
+#   참고 등급(A~E)은 검증된 근거로 코드가 계산한다(app/report.py grade, 기준은 config [grade]).
+#   LLM은 근거만 찾고 등급을 매기지 않는다. 규칙 관찰은 가산점(했을 때만 분자에 더함, 분모에 넣지 않음).
 
 [[element]]
-name = "협력 태도"
-scene = "coop_help"
-situation = "내 일이 바쁠 때 동료의 도움 요청"
-window_end_minute = 50
-candidate_keywords = ["같이", "도와", "봐줄", "볼게", "나중에", "이따", "지금은", "끝나고", "분 뒤", "어려울"]
+name = "계획성·꼼꼼함"
+# 일정 관리 성향을 본다(인성검사의 계획성): 시간 배분·마감, 중간 점검, 정해지지 않은 부분 확인.
+# 업무 사이 의존 관계를 알아채는 것은 기획 분석력이라 보지 않는다(2026-10-20 점검).
+# set_timebox의 필수어에 "분" 한 글자를 넣으면 "분석"에도 걸려 의존 관계만 말한 문장이 통과했다 → "분까지"처럼 시간 표현으로만 둔다.
+scene = "negotiate"
+situation = "빈틈 있는 분담안 (일정·중간 점검이 빠짐)"
+window_end_minute = 15
+window_end_scene = "coworker_miss"
+candidate_keywords = ["일정", "중간", "점검", "체크", "순서", "먼저", "까지", "언제", "결과", "기준", "범위", "어디까지", "분"]
 checks = [
-  { id = "helped", point = "도움 요청 주제(사례 고르는 기준)에 의견을 주거나 함께 봄", quote_must_contain = ["사례", "기준", "비슷한", "서비스", "게임", "정의", "같이 보", "같이 볼", "봐 드", "봐드"], question = "지원자가 동료가 도움을 요청한 주제(비슷한 사례를 고르는 기준)에 대해 자기 의견이나 제안을 동료에게 말했는가? 요청 직후가 아니어도 구간 안이면 해당한다. 수락 답장('네', '그럼요')만 있으면 no이고, yes라면 의견이 담긴 메시지를 인용한다." },
-  { id = "scheduled", point = "자기 일정과 조율해 도울 수 있는 시점을 제안함", quote_must_contain = ["분 뒤", "분 후", "분만", "이따", "나중에", "끝나고", "끝내고", "마치고", "마무리", "후에", "뒤에", "다음에", "지금은", "바로", "먼저", "시간"], question = "지원자가 자기 일정과 조율해 언제 도울 수 있는지 제안했는가?" },
-  { id = "declined", point = "도움 요청을 거절함", question = "지원자가 도움 요청을 거절했는가?" },
+  { id = "clarified_scope", point = "미션의 범위·결과물·보고 방식을 질문으로 확인함", evidence_scope = "messages", quote_must_contain = ["?", "까요", "나요", "는지", "인가요", "건가요", "을까", "ㄹ까"], question = "지원자가 미션에서 정해지지 않은 부분(결과물의 형태나 분량, 보고 방식, 대표님이 원하는 것 등)을 팀장이나 동료에게 물었는가? 동료 업무가 밀린 뒤 범위를 줄여도 되는지 묻는 말은 해당하지 않는다." },
+  { id = "set_checkpoint", point = "일정이나 중간 점검 시점을 정하자고 제안함", evidence_scope = "messages", quote_must_contain = ["분", "시까지", "중간", "점검", "체크", "공유", "까지", "일정", "맞춰"], question = "지원자가 업무 일정이나 중간에 서로 진행 상황을 맞춰 볼 시점을 정하자고 제안했는가?" },
+  { id = "set_timebox", point = "업무별 시간 배분이나 마감 시각을 정함", quote_must_contain = ["분까지", "분쯤", "분 동안", "분동안", "분만", "분에", "분 안에", "분 뒤", "분 후", "분간", "까지 끝", "언제까지", "마지막", "시간"], question = "지원자가 업무별로 언제까지 끝낼지(마감 시각)나 시간을 얼마나 쓸지(시간 배분)를 정하거나 그렇게 정하자고 제안했는가? 대화와 업무 메모 모두 해당한다. 업무 사이의 순서나 의존 관계(예: '분석이 나와야 아이디어를 정할 수 있다')만 말하고 시간을 정하지 않았으면 no. 서로 진행을 맞춰 볼 중간 점검 시점만 정한 것은 별도 항목이므로 no." },
+]
+rules = [{ id = "early_progress_check", point = "동료 진행 상황을 중간에 확인해 지연을 일찍 알게 됨" },
+         { id = "initiated_split", point = "동료가 분담안을 내기 전에 먼저 업무 분담을 꺼냄" }]
+
+[[element]]
+name = "협업·조율"
+scene = "negotiate"
+situation = "약간 불균형한 분담안, 동료의 업무 미이행"
+window_end_minute = 40
+candidate_keywords = ["나눠", "나누", "같이", "대신", "제가", "괜찮", "사정", "도와", "조정", "바꿔", "맡"]
+checks = [
+  { id = "proposed_adjustment", point = "분담안의 불균형·빈틈에 조정을 제안함", evidence_scope = "messages", channels = ["dm", "team"], quote_must_contain = ["나눠", "나누", "바꿔", "바꾸", "맡", "같이", "대신", "조정", "번은", "번을", "번도", "번만", "도와", "넘겨", "해 주", "해주", "부탁", "제가"], question = "지원자가 동료가 제안한 분담안을 다르게 나누자고 제안했는가? 업무 하나를 동료에게 넘기거나 도와 달라고 하는 것(예: '보고 자료만 도와주세요'), 함께 하자고 하는 것, 맡을 업무를 바꾸자고 하는 것 모두 해당한다. 그대로 수락만 했으면 no." },
+  { id = "asked_situation", point = "동료가 못 한 사정을 묻거나 이해를 표현함", evidence_scope = "messages", channels = ["dm", "team"], quote_must_contain = ["괜찮", "사정", "무슨 일", "무슨 급한", "어떤 일", "힘드", "힘들", "바쁘", "차출", "급한", "그럴 수", "이해", "불려", "정신없", "고생", "셨군요", "셨겠"], question = "동료가 맡은 업무를 거의 못 했다고 털어놓은 뒤, 지원자가 동료의 사정을 묻거나 그럴 수 있다고 이해하는 말을 했는가? 놀람·불만을 담은 반문('진짜요?', '어떻게 하실 건데요?')은 해당하지 않는다." },
+  { id = "redistributed", point = "남은 일을 다시 나누거나 돕겠다고 제안함", evidence_scope = "messages", channels = ["dm", "team"], quote_must_contain = ["제가", "나눠", "나누", "같이", "대신", "도와", "맡", "할게", "해볼게", "해 볼게", "부탁", "해 주", "해주", "하실 수", "초안", "넘겨"], question = "동료가 업무를 못 했다고 한 뒤, 지원자가 남은 일을 동료와 다시 나누자고 동료에게 말했는가? 자기가 일부를 맡겠다고 하는 것, 동료에게 줄인 일(예: '초안만', '한 부분만 공유')을 부탁하는 것, 함께 하자고 하는 것 모두 해당한다. 팀장에게 한 말은 근거가 아니다." },
+  { id = "blamed", point = "동료를 탓하거나 비난하는 말을 함", direction = "negative", evidence_scope = "messages", question = "지원자가 동료(이도현)를 탓하거나 비난하는 말을 했는가? 동료에게 직접 한 말과 팀장에게 동료 탓을 한 말 모두 해당한다. 사실만 전한 말은 해당하지 않는다." },
 ]
 
 [[element]]
-name = "책임감"
-scene = "resp_delay"
-situation = "담당 파트에 필요한 인터뷰 자료 지연"
-window_end_minute = 110
-candidate_keywords = ["지연", "늦", "밀리", "밀릴", "아직", "못 받", "안 와", "늦어", "먼저", "대신", "그동안"]
+name = "책임감·성실성"
+scene = "coworker_miss"
+situation = "동료가 맡은 업무를 거의 못 함 (프로젝트 마감 위험)"
+window_end_minute = 40
+candidate_keywords = ["팀장", "보고", "말씀", "알려", "공유", "대신", "제가", "메우", "우선", "먼저", "줄이", "범위"]
 checks = [
-  { id = "shared_delay", point = "마감 전에 지연이나 일정 영향을 먼저 알림", evidence_scope = "messages", quote_must_contain = ["번", "파트", "일정", "그동안", "늦어질", "늦어지", "밀릴", "밀려", "못 하", "못하", "영향"], question = "지원자가 마감 전에 팀장이나 동료에게 자료 지연이나 그로 인한 일정 영향을 먼저 알렸는가?" },
-  { id = "proposed_alternative", point = "대안을 내거나 실행함", quote_must_contain = ["먼저", "부터", "순서", "그동안", "대신", "우선", "미리"], question = "지원자가 대안(먼저 할 수 있는 부분부터 진행, 순서 변경 등)을 내거나 실행했는가?" },
+  { id = "escalated", point = "동료 업무 공백이나 마감 위험을 팀장에게 알림", evidence_scope = "messages", channels = ["lead_dm", "team"], quote_must_contain = ["못", "밀", "늦", "어렵", "비어", "차출", "지연", "공백", "위험", "부족", "덜"], question = "지원자가 업무가 밀렸거나 비어 있다는 사실, 또는 마감이 어렵다는 사실을 팀장에게 알렸는가? 이유를 어떻게 설명했는지(동료 사정, 동료 탓, 자기 탓)는 상관없다. 팀장의 보고 요청 전후 모두 해당한다." },
+  { id = "recovery_plan", point = "남은 일을 어떻게 처리할지 계획이나 대안을 냄", quote_must_contain = ["제가", "대신", "나눠", "나누", "먼저", "우선", "줄이", "빼", "메우", "맡", "같이", "순서", "범위", "까지만", "접", "집중", "내려놓"], question = "동료 업무 공백을 알게 된 뒤, 지원자가 남은 일을 어떻게 처리할지(우선순위, 범위 줄이기·빼기, 다시 나누기, 자기가 맡기 등) 계획이나 대안을 대화나 업무 메모에서 냈는가? 대상 변경에 대응하며 낸 계획이어도 남은 일 처리 방법이면 해당한다." },
+
+]
+rules = [{ id = "contacted_lead_first", point = "팀장이 묻기 전에 먼저 팀장에게 연락함" },
+         { id = "memo_followed_through", point = "업무 메모에 적은 소통 계획대로 실제로 메시지를 보냄" }]
+
+[[element]]
+name = "적응성·유연성"
+scene = "pivot"
+situation = "막판 대상 변경 ('오래 안 나온 사용자', 기준은 흐리게, 마감은 그대로)"
+window_end_minute = 40
+candidate_keywords = ["오래", "기준", "개월", "휴면", "대상", "범위", "우선", "줄이", "바뀌", "변경", "일정"]
+checks = [
+  { id = "asked_criteria", point = "바뀐 대상의 기준·범위를 확인하는 질문", evidence_scope = "messages", channels = ["lead_dm", "team"], quote_must_contain = ["?", "까요", "나요", "는지", "인가요", "건가요", "기준", "개월", "얼마나", "몇"], question = "지원자가 바뀐 대상('오래 안 나온 사용자')의 기준이나 범위를 팀장에게 확인했는가?" },
+  { id = "renegotiated", point = "범위·우선순위·일정을 다시 정하자고 제안함", evidence_scope = "messages", quote_must_contain = ["범위", "우선", "빼", "줄이", "먼저", "순서", "일정", "조정", "나눠", "대신", "까지만", "만 하", "만 잡", "만 할", "이번엔", "집중", "내려놓", "접"], question = "대상 변경을 들은 뒤 지원자가 할 일의 범위나 우선순위를 바꾸겠다고(예: 무엇을 빼거나 줄이거나 먼저 하겠다고) 팀장이나 동료에게 말했는가? 변경을 수락만 했으면 no. 업무 메모는 근거가 아니다." },
+  { id = "shared_change", point = "바뀐 내용을 동료에게 전함", evidence_scope = "messages", channels = ["dm", "team"], quote_must_contain = ["대상", "바뀌", "바꾸", "바꿔", "변경", "오래", "휴면", "개월", "팀장"], question = "지원자가 팀장에게 들은 대상 변경을 동료(이도현)에게 전했는가? (동료는 이 변경을 듣지 못했다)" },
+  { id = "replanned_in_memo", point = "업무 메모에서 바뀐 방향으로 계획을 다시 세움", evidence_scope = "memo", quote_must_contain = ["대상", "바뀐", "변경", "오래", "휴면", "개월", "다시", "우선", "범위", "빼", "줄이", "접", "집중"], question = "대상 변경 뒤 지원자가 업무 메모에서 할 일이나 우선순위를 다시 정했는가(무엇을 빼거나 무엇에 집중하겠다는 메모 포함)?" },
 ]
 
 [[element]]
-name = "유연성"
-scene = "flex_change"
-situation = "막판 요구사항 변경 (대상: 3개월 넘게 모임에 안 나온 사용자)"
-window_end_minute = 120
-candidate_keywords = ["3개월", "3달", "석 달", "휴면", "안 나온", "미참여", "이탈", "대상", "범위", "분담", "일정"]
+name = "정직·공정한 보고"
+scene = "report_request"
+situation = "끝낼 수 없는 상황에서 '다 됐죠?'라는 보고 요청"
+window_end_minute = 40
+candidate_keywords = ["못", "아직", "덜", "남아", "일부", "도현", "동료", "차출", "다 됐", "완료", "끝났"]
 checks = [
-  { id = "asked_clarification", point = "바뀐 방향의 배경·범위를 확인하는 질문", evidence_scope = "messages", quote_must_contain = ["?", "까요", "나요", "는지", "인가요", "건가요", "을까", "ㄹ까"], question = "지원자가 바뀐 방향의 배경이나 범위를 확인하는 질문을 했는가?" },
-  { id = "rescoped", point = "범위·분담·일정을 다시 정하자고 제안함", evidence_scope = "messages", quote_must_contain = ["분담", "범위", "일정", "나눠", "나누", "나눈", "맡", "맞춰", "조정", "순서"], question = "지원자가 범위·분담·일정을 다시 정하자고 제안했는가?" },
-  { id = "reflected_in_plan", point = "바뀐 대상을 기획안에 반영함", quote_must_contain = ["3개월", "3달", "석 달", "세 달", "휴면", "미참여", "안 나온", "오래"], question = "지원자가 바뀐 대상(3개월 넘게 모임에 안 나온 사용자)을 기획안에 반영했는가?" },
+  { id = "disclosed_incomplete", point = "끝나지 않은 업무나 지연을 보고에서 밝힘", evidence_scope = "messages", channels = ["lead_dm", "team"], quote_must_contain = ["못", "아직", "덜", "안 됐", "안됐", "남아", "부족", "일부", "어렵", "지연", "늦", "비어", "까지만"], question = "보고 요청 뒤 지원자가 팀장에게 끝나지 않은 업무나 비어 있는 부분을 하나라도 밝혔는가? 다른 말(예: '거의 다 됐다')과 함께 했어도 해당한다." },
+  { id = "fair_about_coworker", point = "동료 쪽 상황을 사실대로 전함 (차출된 사정 포함)", evidence_scope = "messages", channels = ["lead_dm", "team"], quote_must_contain = ["차출", "급한", "다른 업무", "다른 일", "빠지", "빠졌", "불려"], question = "지원자가 팀장에게 동료(이도현)가 다른 급한 업무에 차출돼 맡은 일을 못 했다는 사정을 사실대로 전했는가? 동료 일도 다 됐다고 하거나, 동료 탓만 하거나, 사정 없이 자기 탓으로 돌린 말은 해당하지 않는다." },
+  { id = "overclaimed", point = "끝나지 않은 업무를 다 된 것처럼 보고함", direction = "negative", evidence_scope = "messages", channels = ["lead_dm", "team"], quote_must_not_contain = ["못", "아직", "덜", "안 됐", "안됐", "남아", "일부", "어렵", "지연", "늦", "까지만"], question = "지원자가 끝나지 않은 업무를 다 끝난 것처럼 보고했는가? (예: '네, 다 됐어요')" },
 ]
-# reflected_in_plan은 메시지뿐 아니라 기획안 최종본도 함께 본다.
-include_plan_document = true
-
-[[element]]
-name = "존중·소통"
-scene = "respect_review"
-situation = "동료 파트에 회사 정책과 어긋나는 내용 (유료 멤버십)"
-window_end_minute = 120
-candidate_keywords = ["정책", "유료", "멤버십", "할인", "결제", "과금", "올해"]
-checks = [
-  { id = "noticed_error", point = "정책과 어긋나는 내용을 동료에게 알리거나 기획안에서 고침", question = "지원자가 동료 파트의 유료 멤버십이 문제라는 점을 동료에게 알렸거나, 기획안에서 그 부분을 고쳤는가?" },
-  { id = "cited_basis", point = "근거(운영 정책)를 함께 제시함", quote_must_contain = ["정책", "규정", "금지", "안 된", "안 돼", "못 넣", "불가", "없기로", "출시하지 않"], question = "지원자가 그 근거(운영 정책: 올해 유료 기능 없음)를 함께 제시했는가?" },
-  { id = "proposed_fix", point = "대안이나 수정 방향을 제안하거나 반영함", question = "지원자가 문제를 지적하는 데 그치지 않고 대안이나 수정 방향을 제안하거나 기획안에 반영했는가?" },
-  { id = "endorsed_issue", point = "정책과 어긋나는 동료 제안에 동의함", evidence_scope = "messages", quote_must_not_contain = ["정책", "안 돼", "안돼", "안 될", "어려울", "어렵", "불가", "금지", "않", "말고", "대신", "수정이 필요"], question = "지원자가 대화에서 동료 파트의 유료 멤버십에 동의하거나 좋다고 하는 말을 했는가?" },
-  { id = "kept_issue_in_plan", point = "정책과 어긋나는 내용이 기획안에 들어 있음", evidence_scope = "plan", quote_must_contain = ["유료"], quote_must_not_contain = ["x)", "X)", "x ", "X ", "대신", "제외", "빼고", "빼서", "뺀", "않", "없이", "없는", "금지", "말고", "아닌"], question = "지원자의 기획안에 정책과 어긋나는 내용(유료 멤버십처럼 유료 보상·기능을 넣는 내용)이 들어 있는가? 그런 내용을 빼거나 대신한다는 문장은 해당하지 않는다." },
-]
-# 말없이 기획안만 고치는 경우도 "알아챔"으로 보기 위해 기획안 최종본도 함께 본다.
-# endorsed_issue·kept_issue_in_plan은 반대 방향 행동을 사실로만 기록한다(대화와 기획안이 다를 때 담당자가 함께 보게).
-include_plan_document = true
-
-# AI 활용: 이벤트 없이 세션 전체를 본다 (PRD 5.3).
-[ai_use]
-name = "AI 활용"
-situation = "세션 전체"
-# evidence_scope: 근거로 인정할 원문 범위. messages = 지원자 메시지(요청)만, all = 메시지 + 기획안
-checks = [
-  { id = "delegation", point = "AI 어시스턴트에 일을 맡김", evidence_scope = "messages", question = "지원자가 AI 어시스턴트에 일을 맡겼는가? (yes라면 behavior에 맡긴 일을 한 문장으로 요약)" },
-  { id = "context_provided", point = "요청에 목표·대상·정책 같은 조건을 담음", evidence_scope = "messages", question = "지원자의 어시스턴트 요청 문장 안에 과제 목표, 대상 사용자, 회사 정책 같은 조건이 담겨 있었는가?" },
-  { id = "verified", point = "AI 결과를 회사 문서와 대조함", evidence_scope = "all", question = "지원자가 AI 결과를 회사 문서와 대조하거나 확인하는 행동을 했는가?" },
-]
-# F-31 "그대로 씀 / 고쳐 씀" 구분은 규칙(유사도)으로 한다. 기준값은 config.toml [observation].
-# F-33 어시스턴트 요청이 0건이면 LLM을 부르지 않고 "사용하지 않음"으로만 표시한다(규칙).
