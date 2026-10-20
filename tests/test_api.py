@@ -82,3 +82,20 @@ def test_admin_can_retry_only_failed_report(monkeypatch):
     store.update_report(sid, state="failed")
     assert client.post(f"/api/admin/reports/{sid}/retry", headers=a).status_code == 200
     assert started == [sid] and store.get_session(sid)["status"] == "completed"
+
+
+# 중간점검 확인필요(F-01): 같은 회사 이름으로 다른 사람이 가입하면 그 회사의 지원자·리포트가 보였다
+def test_same_company_name_cannot_sign_up_again():
+    from fastapi.testclient import TestClient
+    from app.api import app
+    c = TestClient(app)
+    h = {"Authorization": "Bearer " + c.post("/api/auth/signup", json={
+        "email": "owner@dup.kr", "password": "password123", "company": "중복 테스트사"}).json()["token"]}
+    c.post("/api/admin/invites", json={"alias": "비밀지원자"}, headers=h)
+    for name in ("중복 테스트사", "중복테스트사", "  중복  테스트사 "):
+        r = c.post("/api/auth/signup", json={"email": "stranger@evil.kr", "password": "password123", "company": name})
+        assert r.status_code == 400 and "이미 등록된 회사" in r.json()["detail"]
+    r = c.post("/api/auth/signup", json={"email": "owner@dup.kr", "password": "password123", "company": "다른사"})
+    assert "이미 가입한 이메일" in r.json()["detail"]
+    assert c.post("/api/auth/signup", json={"email": "b@other.kr", "password": "password123",
+                                            "company": "다른 회사"}).status_code == 200

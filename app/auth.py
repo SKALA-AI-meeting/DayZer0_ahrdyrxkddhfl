@@ -43,14 +43,17 @@ def signup(email: str, password: str, company: str) -> str:
     """관리자 가입 후 토큰을 반환한다.
 
     Raises:
-        AuthError: 입력이 비었거나 이미 가입한 이메일.
+        AuthError: 입력이 비었거나, 이미 가입한 이메일이거나, 이미 등록된 회사 이름(한 회사 한 계정, F-01).
     """
-    email, company = email.strip().lower(), company.strip()
+    email, company = email.strip().lower(), " ".join(company.split())
     if not email or not company or len(password) < 8:
         raise AuthError("이메일·회사 이름을 입력하고 비밀번호는 8자 이상으로 해 주세요.")
     salt = secrets.token_hex(16)
-    if not store.create_admin(email, company, salt, _hash(password, salt)):
+    result = store.create_admin(email, company, salt, _hash(password, salt))
+    if result == "email":
         raise AuthError("이미 가입한 이메일입니다.")
+    if result == "company":
+        raise AuthError("이미 등록된 회사 이름입니다. 같은 회사라면 기존 담당자 계정으로 로그인해 주세요.")
     return issue_token(email, company)
 
 

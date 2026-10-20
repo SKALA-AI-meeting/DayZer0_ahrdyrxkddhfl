@@ -208,6 +208,7 @@ START → prepare(형식 검사·개인정보 마스킹) → approval: interrupt
 | PostgreSQL + pgvector | SQLite | 설치 없이 바로 실행·테스트(테스트마다 임시 DB). 저장소 함수(`app/store.py`)만 바꾸면 이전 가능 |
 | MCP Streamable HTTP (별도 컨테이너) | MCP stdio (에이전트가 자식 프로세스로 실행) | 로컬 MVP에서 포트·컨테이너 없이 동작. 서버 코드는 `mcp.run(transport=...)`만 바꾸면 HTTP로 전환 |
 | business-mcp가 gateway 내부 API 경유 | 같은 SQLite 파일을 직접 읽음 | 프로세스 하나 줄여 단순화. 변경은 모두 MCP 도구를 거침 |
+| (PRD에 담당자 수 정의 없음) | 한 회사 한 관리자 계정. 같은 회사 이름(대소문자·공백 무시)으로는 가입 불가 | 기업을 회사 이름으로 구분하므로, 같은 이름 가입을 허용하면 남의 지원자·리포트가 보임(F-01). 담당자 여러 명은 PRD 범위 밖 |
 | 미리 색인한 Vector DB (BGE-M3 + pgvector) | 미리 색인한 임베딩(`text-embedding-3-small`) + SQLite + 코사인 유사도, 실패 시 키워드 | 팀 키로 쓸 수 있고 새 라이브러리·로컬 모델 다운로드가 필요 없음. 문서 수가 적어 별도 벡터 DB 없이 충분. 저장소만 pgvector로 바꾸면 이전 가능 |
 | 202 + SSE 진행 이벤트 | 화면이 2초마다 조회(poll) + 진행 이벤트 필드 | 장면을 정시에 실행하는 시계와 같은 조회로 처리해 스케줄러 불필요 |
 | RabbitMQ 리포트 큐 | 백그라운드 작업 + 2회 재시도 + 재시작 시 재생성 | MVP 범위. 같은 재시도·실패 처리 규칙 유지 |

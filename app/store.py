@@ -392,13 +392,24 @@ def set_company_scenario(company: str, scenario: str) -> None:
                      " ON CONFLICT(company) DO UPDATE SET scenario = excluded.scenario", (company, scenario))
 
 
-def create_admin(email: str, company: str, salt: str, pw_hash: str) -> bool:
-    """관리자 계정을 만든다. 이미 있는 이메일이면 False."""
+def create_admin(email: str, company: str, salt: str, pw_hash: str) -> str:
+    """관리자 계정을 만든다. 한 회사에 계정 하나(F-01: 다른 기업의 지원자·리포트는 보이지 않음).
+
+    기업을 회사 이름으로 구분하므로, 같은 이름(대소문자·공백 무시)으로 가입하면 남의 데이터가 보인다.
+    그래서 이름이 겹치면 만들지 않는다. 확인과 저장을 한 문장으로 해 동시에 가입해도 하나만 된다.
+
+    Returns:
+        "ok" | "email"(이미 가입한 이메일) | "company"(이미 등록된 회사 이름).
+    """
     with connect() as conn:
+        if conn.execute("SELECT 1 FROM admins WHERE email = ?", (email,)).fetchone():
+            return "email"
         cur = conn.execute(
-            "INSERT OR IGNORE INTO admins (email, company, salt, pw_hash) VALUES (?, ?, ?, ?)",
-            (email, company, salt, pw_hash))
-        return cur.rowcount == 1
+            "INSERT OR IGNORE INTO admins (email, company, salt, pw_hash) SELECT ?, ?, ?, ?"
+            " WHERE NOT EXISTS (SELECT 1 FROM admins"
+            "  WHERE lower(replace(company, ' ', '')) = lower(replace(?, ' ', '')))",
+            (email, company, salt, pw_hash, company))
+        return "ok" if cur.rowcount == 1 else "company"
 
 
 def get_admin(email: str) -> dict | None:
