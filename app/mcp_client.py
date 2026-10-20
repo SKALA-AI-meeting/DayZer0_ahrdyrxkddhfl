@@ -27,7 +27,8 @@ def _client() -> MultiServerMCPClient:
 
 
 @asynccontextmanager
-async def doc_tools(session_minute: float, company: str = "", plan_session_id: str = ""):
+async def doc_tools(session_minute: float, company: str = "", plan_session_id: str = "",
+                    scenario: str = ""):
     """rag-mcp에 연결해, 시각·기업이 고정된 문서 도구 3개를 모델용으로 돌려준다.
 
     plan_session_id를 주면 business-mcp에도 연결해 공유 문서 읽기 도구(read_shared_plan)를 더한다
@@ -41,16 +42,19 @@ async def doc_tools(session_minute: float, company: str = "", plan_session_id: s
         async def search_company_docs(query: str) -> str:
             """회사 문서(지표, 정책, 회의록, 소개, 인터뷰 등)에서 관련 문단을 찾는다. 결과의 title을 출처로 밝힌다."""
             return await raw["search_company_docs"].ainvoke(
-                {"query": query, "session_minute": session_minute, "company": company})
+                {"query": query, "session_minute": session_minute, "company": company,
+                 "scenario": scenario})
 
         async def read_company_doc(doc_id: str) -> str:
             """회사 문서 전문을 읽는다. doc_id는 list_company_docs 결과의 doc_id."""
             return await raw["read_company_doc"].ainvoke(
-                {"doc_id": doc_id, "session_minute": session_minute, "company": company})
+                {"doc_id": doc_id, "session_minute": session_minute, "company": company,
+                 "scenario": scenario})
 
         async def list_company_docs() -> str:
             """지금 읽을 수 있는 회사 문서 목록을 본다."""
-            return await raw["list_company_docs"].ainvoke({"session_minute": session_minute, "company": company})
+            return await raw["list_company_docs"].ainvoke({"session_minute": session_minute, "company": company,
+                 "scenario": scenario})
 
         async def read_shared_plan() -> str:
             """공유 문서(기획안)를 읽는다. 파트별 담당자와 지원자·동료가 쓴 내용을 본다(읽기 전용)."""

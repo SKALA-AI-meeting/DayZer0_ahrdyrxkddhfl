@@ -22,11 +22,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app import clock, docs, llm, store
-from app.settings import PART_TITLES, config, observation_spec, prompt
+from app.settings import PART_IDS, config, names, observation_spec, part_titles, prompt
 
 JUDGE_VERSION = "v1"   # 판별 프롬프트·형식을 바꾸면 올린다(캐시 무효화)
-NAMES = {"candidate": "지원자", "coworker": "이도현", "lead": "한서윤 팀장", "system": "시스템",
-         "assistant": "AI 어시스턴트"}
 
 
 class CheckAnswer(BaseModel):
@@ -50,7 +48,7 @@ def _window_messages(session_id: str, start: float, end: float) -> list[dict]:
 
 def _candidate_plan(session_id: str) -> dict[str, str]:
     """지원자가 쓴 기획안 파트만 (동료 공유분 coworker:* 제외)."""
-    return {k: v for k, v in store.get_parts(session_id).items() if k in PART_TITLES}
+    return {k: v for k, v in store.get_parts(session_id).items() if k in PART_IDS}
 
 
 def _evidence_texts(messages: list[dict], plan: dict[str, str]) -> dict[str, str]:
@@ -130,12 +128,13 @@ async def _judge(session_id: str, situation: str, checks: list[dict], transcript
     return result.answers
 
 
-def _format(messages: list[dict], plan: dict[str, str] | None) -> str:
+def _format(messages: list[dict], plan: dict[str, str] | None, pack: str | None = None) -> str:
+    who, titles = names(pack), part_titles(pack)
     lines = [f"[id=m{m['id']}][{clock.format_minute(m['minute'])}][{m['channel']}] "
-             f"{NAMES[m['sender']]}: {m['content']}" for m in messages]
+             f"{who[m['sender']]}: {m['content']}" for m in messages]
     if plan is not None:
         lines.append("\n[지원자가 쓴 기획안 최종본]")
-        lines += [f"[id=plan:{k}] {PART_TITLES[k]}: {v}" for k, v in sorted(plan.items())]
+        lines += [f"[id=plan:{k}] {titles[k]}: {v}" for k, v in sorted(plan.items())]
     return "\n".join(lines) or "(기록 없음)"
 
 
@@ -162,7 +161,7 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
     hint = ("참고: 키워드 후보 메시지 id = " + ", ".join(f"m{i}" for i in sorted(hits))
             + " (후보일 뿐이다. 다른 메시지도 모두 본다)") if hits else "키워드 후보 없음. 모든 메시지를 본다."
     answers = await _judge(session_id, spec["situation"], spec["checks"],
-                           _format(messages, plan), hint, use_cache)
+                           _format(messages, plan, store.get_session(session_id)["scenario"]), hint, use_cache)
     evidence = _evidence_texts(messages, plan or {})
     return {**base, "happened": True, "checks": verify(answers, evidence)}
 
@@ -193,7 +192,8 @@ def classify_reuse(similarity: float) -> str:
 
 async def observe_ai_use(session_id: str, mode: str = "hybrid", use_cache: bool = True) -> dict:
     """AI 활용을 판별한다. 요청 0건이면 LLM 없이 '사용하지 않음'(F-33)."""
-    spec = observation_spec()["ai_use"]
+    pack = store.get_session(session_id)["scenario"]
+    spec = observation_spec(pack)["ai_use"]
     log = store.list_messages(session_id, channels=("assistant",))
     requests = [m for m in log if m["sender"] == "candidate"]
     base = {"element": spec["name"], "situation": spec["situation"]}
@@ -213,7 +213,7 @@ async def observe_ai_use(session_id: str, mode: str = "hybrid", use_cache: bool 
         return {**base, "used": True, "requests": reuse, "checks": doc_checks}
 
     answers = await _judge(session_id, spec["situation"], spec["checks"],
-                           _format(log, plan), "AI 어시스턴트 대화 기록과 지원자 기획안이다.", use_cache)
+                           _format(log, plan, pack), "AI 어시스턴트 대화 기록과 지원자 기획안이다.", use_cache)
     evidence = {f"m{m['id']}": m["content"] for m in requests}
     evidence.update({f"plan:{k}": v for k, v in plan.items()})
     scopes = {c["id"]: c.get("evidence_scope", "all") for c in spec["checks"]}
@@ -226,8 +226,8 @@ def cross_checked_docs(session_id: str, log: list[dict]) -> list[dict]:
 
     LLM 판단 없이 열람 기록(doc_views)으로 확정한다. 근거 id는 "view:<분>" 형식.
     """
-    company = store.get_session(session_id)["company"]
-    titles = {d["id"]: d["title"] for d in docs.all_docs(company)}
+    s = store.get_session(session_id)
+    titles = {d["id"]: d["title"] for d in docs.all_docs(s["company"], s["scenario"])}
     views = store.doc_views(session_id)
     out, seen = [], set()
     for m in log:
@@ -249,6 +249,6 @@ async def observe_session(session_id: str, mode: str = "hybrid", use_cache: bool
     """세션의 인성 요소 4개 + AI 활용을 판별한다."""
     run_minutes = store.scene_run_minutes(session_id)
     results = [await observe_element(session_id, spec, run_minutes, mode, use_cache)
-               for spec in observation_spec()["element"]]
+               for spec in observation_spec(store.get_session(session_id)["scenario"])["element"]]
     results.append(await observe_ai_use(session_id, mode, use_cache))
     return results

@@ -1,4 +1,4 @@
-"""동료(이도현)·팀장(한서윤)·어시스턴트의 말을 만든다.
+"""동료·팀장·어시스턴트의 말을 만든다(이름·회사는 세션의 시나리오 팩에서).
 
 - 대화 맥락(Harness: Context): 최근 메시지는 history_token_budget 안에서 원문 그대로 넣고,
   예산을 넘는 앞부분은 LLM으로 요약해 넣는다(요약은 캐시, 판정 표현이 섞이면 버림).
@@ -10,12 +10,10 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app import clock, docs, guard, llm, speak_graph, store
-from app.settings import PART_TITLES, config, prompt
+from app.settings import config, names, part_titles, prompt
 
 log = logging.getLogger("dayzero.persona")
 
-NAMES = {"candidate": "지원자", "coworker": "이도현", "lead": "한서윤 팀장",
-         "system": "시스템", "assistant": "AI 어시스턴트", "both": "함께"}
 CHARS_PER_TOKEN = 2   # 한국어 대략치: Token 예산을 글자 수로 바꿀 때 쓰는 근사 상수
 
 
@@ -23,7 +21,8 @@ def _split(session_id: str, channels: tuple[str, ...]) -> tuple[list[dict], list
     """대화를 (예산을 넘은 앞부분 메시지, 그 줄들, 예산 안의 최근 줄들)로 나눈다."""
     budget = config()["context"]["history_token_budget"] * CHARS_PER_TOKEN
     msgs = store.list_messages(session_id, channels=channels)
-    lines = [f"[{clock.format_minute(m['minute'])}][{m['channel']}] {NAMES[m['sender']]}: {m['content']}"
+    who = names(store.get_session(session_id)["scenario"])
+    lines = [f"[{clock.format_minute(m['minute'])}][{m['channel']}] {who[m['sender']]}: {m['content']}"
              for m in msgs]
     kept, size = [], 0
     for line in reversed(lines):
@@ -73,9 +72,9 @@ async def context(session_id: str, channels: tuple[str, ...]) -> str:
     return "\n".join([head] + recent)
 
 
-def docs_text(minute: float, company: str = "") -> str:
+def docs_text(minute: float, company: str = "", pack: str | None = None) -> str:
     """지금 볼 수 있는 회사 문서 목록 (모델이 없는 문서를 다른 문서로 대신 답하지 않게 알려 준다)."""
-    return ", ".join(f"{d['title']}(doc_id={d['id']})" for d in docs.available(company, minute))
+    return ", ".join(f"{d['title']}(doc_id={d['id']})" for d in docs.available(company, minute, pack))
 
 
 def is_review_request(text: str) -> bool:
@@ -83,9 +82,10 @@ def is_review_request(text: str) -> bool:
     return any(p in text for p in config()["verify"]["review_request_phrases"])
 
 
-def assignment_text(assignment: dict[str, str]) -> str:
+def assignment_text(assignment: dict[str, str], pack: str | None = None) -> str:
     """분담안을 사람이 읽는 문장으로 바꾼다."""
-    return ", ".join(f"{p}번 {PART_TITLES[p]}: {NAMES[o]}" for p, o in sorted(assignment.items()))
+    titles, who = part_titles(pack), names(pack)
+    return ", ".join(f"{p}번 {titles[p]}: {who[o]}" for p, o in sorted(assignment.items()))
 
 
 async def speak(role: str, session_id: str, minute: float, task: str,
@@ -107,14 +107,15 @@ async def speak(role: str, session_id: str, minute: float, task: str,
     if role == "lead":   # 팀장은 지원자와 동료의 1:1 대화를 볼 수 없다(팀 채널·알림만)
         channels = tuple(c for c in channels if c != "dm")
     session = store.get_session(session_id)
-    system = (f"{prompt(role)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
-              f"- 현재 분담: {assignment_text(session['assignment'])}\n"
-              f"- 지금 볼 수 있는 회사 문서: {docs_text(minute, session['company'])} (이 목록에 없는 문서는 아직 볼 수 없다)")
+    pack = session["scenario"]
+    system = (f"{prompt(role, pack)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
+              f"- 현재 분담: {assignment_text(session['assignment'], pack)}\n"
+              f"- 지금 볼 수 있는 회사 문서: {docs_text(minute, session['company'], pack)} (이 목록에 없는 문서는 아직 볼 수 없다)")
     human = (f"최근 대화:\n{await context(session_id, channels)}\n\n지금 할 일: {task}\n"
              "메신저에 보낼 메시지 본문만 써라.")
     result = await speak_graph.speak(
         session_id=session_id, node=f"persona.{role}", system=system, human=human, minute=minute,
-        use_tools=use_tools, must_include=must_include, company=session["company"],
+        use_tools=use_tools, must_include=must_include, company=session["company"], scenario=pack,
         plan_access=use_tools,   # 동료·팀장은 공유 문서를 읽을 수 있다(편집은 지원자만)
         required_tool="read_shared_plan" if review else "",   # 검토 요청이면 실제로 읽었는지 검증
         # 동료 파트가 아직 공유 전이면 결과물을 지어내지 않는지 검증

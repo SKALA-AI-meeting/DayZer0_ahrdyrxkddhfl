@@ -78,6 +78,7 @@ class LoginIn(BaseModel):
 class InviteIn(BaseModel):
     alias: str
     email: str = ""
+    scenario: str = ""      # 시나리오 팩(채용 건). 비우면 기본 팩
 
 
 @app.post("/api/auth/signup")
@@ -104,9 +105,23 @@ def me(admin: dict = Depends(_admin)) -> dict:
 @app.post("/api/admin/invites")
 def create_invite(body: InviteIn, admin: dict = Depends(_admin)) -> dict:
     try:
-        return auth.create_invite(admin["company"], body.alias, body.email)
+        return auth.create_invite(admin["company"], body.alias, body.email, body.scenario)
     except auth.AuthError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+def _pack_public(pack: str) -> dict:
+    """화면에 보여줄 시나리오 팩 정보(회사·서비스·등장인물)."""
+    info = settings.pack_info(pack)
+    keys = ("id", "company", "company_desc", "service", "service_desc", "task_title",
+            "lead_name", "lead_short", "lead_role", "coworker_name", "coworker_short", "coworker_role")
+    return {k: info[k] for k in keys}
+
+
+@app.get("/api/admin/scenarios")
+def scenarios(admin: dict = Depends(_admin)) -> list[dict]:
+    """고를 수 있는 시나리오 팩 목록(기업 맞춤 시나리오). 첫 번째가 기본(공통 PRD)."""
+    return [_pack_public(p) for p in settings.pack_ids()]
 
 
 @app.get("/api/admin/candidates")
@@ -123,7 +138,8 @@ def get_report(sid: str, admin: dict = Depends(_admin)) -> dict:
     """리포트(F-04)와 근거 원문 이동용 전체 대화(F-05)."""
     s = _own_session(sid, admin)
     rep = store.get_report(sid)
-    return {"alias": s["alias"], "status": s["status"],
+    return {"alias": s["alias"], "status": s["status"], "names": settings.names(s["scenario"]),
+            "pack": _pack_public(s["scenario"]),
             "report": rep["body"] if rep and rep["state"] == "ready" else None,
             "report_state": rep["state"] if rep else None,
             "messages": [_msg(m) for m in store.list_messages(sid)]}
@@ -161,7 +177,8 @@ def invite_info(token: str) -> dict:
         raise HTTPException(404, "잘못된 링크입니다.")
     return {"state": state, "company": s["company"], "alias": s["alias"],
             "duration_minutes": settings.config()["session"]["duration_minutes"],
-            "consented": bool(s["consented"]), "started": s["status"] != "invited"}
+            "consented": bool(s["consented"]), "started": s["status"] != "invited",
+            "pack": _pack_public(s["scenario"])}
 
 
 @app.post("/api/invite/{token}/consent")
@@ -195,11 +212,13 @@ async def poll(token: str, after: int = 0) -> dict:
         **state, "time": clock.format_minute(state["minute"]), "phase": s["phase"],
         "messages": [_msg(m) for m in store.list_messages(s["id"], after_id=after)],
         "tasks": store.list_tasks(s["id"]),
-        "my_parts": {k: v for k, v in parts.items() if k in settings.PART_TITLES},
+        "my_parts": {k: v for k, v in parts.items() if k in settings.PART_IDS},
         "coworker_parts": {k.split(":")[1]: v for k, v in parts.items() if k.startswith("coworker:")},
         "docs": [{"id": d["id"], "title": d["title"]}
                  for d in docs_module.available(s["company"], state["minute"])],
-        "part_titles": settings.PART_TITLES,
+        "part_titles": settings.part_titles(s["scenario"]),
+        "names": settings.names(s["scenario"]),
+        "pack": _pack_public(s["scenario"]),
         "activity": progress.get(s["id"]),   # 진행 이벤트: AI가 지금 하는 일
         "poll_interval_seconds": settings.config()["session"]["poll_interval_seconds"],
         "time_scale": settings.config()["session"]["time_scale"],
@@ -284,7 +303,7 @@ def debrief(token: str) -> dict:
     if s["status"] in ("invited", "in_progress"):
         raise HTTPException(400, "평가가 끝난 뒤에 볼 수 있습니다.")
     events = [{"time": clock.format_minute(sc["at_minute"]), "element": sc["element"],
-               "message": sc["message"]} for sc in settings.scenes() if sc["element"]]
+               "message": sc["message"]} for sc in settings.scenes(s["scenario"]) if sc["element"]]
     return {"events": events,
             "notice": "위 상황은 평가를 위해 연출된 것입니다. 리포트는 점수 없이 관찰 기록만 담아 "
                       "채용 담당자에게 전달되며, 최종 판단은 사람이 합니다."}

@@ -7,7 +7,8 @@ import DocAdmin from "@/components/DocAdmin";
 import Nav from "@/components/Nav";
 import { adminToken, api, ApiError, STATUS_LABEL } from "@/lib/api";
 
-type Candidate = { id: string; alias: string; email: string; status: string; invite_path: string };
+type Candidate = { id: string; alias: string; email: string; status: string; invite_path: string; scenario: string };
+type Scenario = { id: string; company: string; service: string; task_title: string };
 
 function CopyButton({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -26,6 +27,8 @@ export default function AdminHome() {
   const [rows, setRows] = useState<Candidate[]>([]);
   const [alias, setAlias] = useState("");
   const [email, setEmail] = useState("");
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [scenario, setScenario] = useState("");
   const [error, setError] = useState("");
   const [created, setCreated] = useState<{ alias: string; url: string } | null>(null);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
@@ -33,6 +36,7 @@ export default function AdminHome() {
   const load = useCallback(async () => {
     try {
       setMe(await api("/admin/me", {}, true));
+      setScenarios(await api("/admin/scenarios", {}, true));
       setRows(await api("/admin/candidates", {}, true));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) router.push("/admin/login");
@@ -51,7 +55,7 @@ export default function AdminHome() {
     setError("");
     try {
       const r = await api<{ invite_path: string }>("/admin/invites", {
-        method: "POST", body: JSON.stringify({ alias, email }),
+        method: "POST", body: JSON.stringify({ alias, email, scenario }),
       }, true);
       setCreated({ alias, url: origin + r.invite_path });
       setAlias(""); setEmail("");
@@ -77,6 +81,12 @@ export default function AdminHome() {
           <div className="row">
             <input placeholder="지원자 별칭 (예: 지원자-01)" value={alias} onChange={(e) => setAlias(e.target.value)} />
             <input placeholder="이메일 (기록용, 선택)" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <select value={scenario} onChange={(e) => setScenario(e.target.value)} style={{ maxWidth: 260 }}
+              title="채용 건의 업무 시나리오. 같은 채용 건의 지원자는 모두 같은 시나리오를 씁니다.">
+              {scenarios.map((s, i) => (
+                <option key={s.id} value={i === 0 ? "" : s.id}>{s.company} · {s.task_title}{i === 0 ? " (기본)" : ""}</option>
+              ))}
+            </select>
             <button type="submit">초대 링크 만들기</button>
           </div>
           {created && (
@@ -91,12 +101,13 @@ export default function AdminHome() {
 
         <div className="card">
           <table>
-            <thead><tr><th>별칭</th><th>이메일</th><th>상태</th><th style={{ textAlign: "right" }}>동작</th></tr></thead>
+            <thead><tr><th>별칭</th><th>이메일</th><th>시나리오</th><th>상태</th><th style={{ textAlign: "right" }}>동작</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td><b>{r.alias}</b></td>
                   <td className="muted">{r.email || "-"}</td>
+                  <td className="muted small">{scenarios.find((s) => s.id === r.scenario)?.company ?? r.scenario}</td>
                   <td><span className={`badge ${r.status}`}>{STATUS_LABEL[r.status] ?? r.status}</span></td>
                   <td style={{ textAlign: "right" }}>
                     {r.status === "report_ready" ? <Link className="btn" href={`/admin/report/${r.id}`}>리포트 보기</Link>
@@ -105,7 +116,7 @@ export default function AdminHome() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={4} className="muted">아직 초대한 지원자가 없습니다. 위에서 초대 링크를 만들어 보세요.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={5} className="muted">아직 초대한 지원자가 없습니다. 위에서 초대 링크를 만들어 보세요.</td></tr>}
             </tbody>
           </table>
         </div>

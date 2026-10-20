@@ -3,7 +3,8 @@
 - 조회 도구: list_company_docs, search_company_docs, read_company_doc
 - 변경 도구: register_company_doc (destructiveHint, 사람 승인 토큰 필수, F-06)
 - Resource: docs://{session_id}/{doc_id} (회사 문서 원문, 근거 패널용 — 교안 29·33쪽),
-            scenario://brief (과제 브리프, 항상 공개)
+            scenario://{pack}/brief (시나리오 팩의 과제 브리프, 항상 공개)
+- 시나리오 팩: 도구의 scenario 인자(코드가 채움)로 기업별 시나리오 문서를 고른다. 서버 코드는 같고 데이터만 바뀐다.
 - 문서 공개 시각(F-15)을 서버가 직접 검사한다. session_minute·company는 모델이 아니라
   에이전트 코드가 채워 넣는다(app/mcp_client.py) → 모델이 값을 바꿔 미리 읽을 수 없다.
 
@@ -39,13 +40,13 @@ def _score(tokens: list[str], text: str) -> int:
 
 
 @mcp.tool(annotations=READ)
-def list_company_docs(session_minute: float, company: str = "") -> list[dict]:
+def list_company_docs(session_minute: float, company: str = "", scenario: str = "") -> list[dict]:
     """지금 열람할 수 있는 회사 문서 목록(id, 제목)을 반환한다."""
-    return [{"doc_id": d["id"], "title": d["title"]} for d in docs.available(company, session_minute)]
+    return [{"doc_id": d["id"], "title": d["title"]} for d in docs.available(company, session_minute, scenario or None)]
 
 
 @mcp.tool(annotations=READ)
-def search_company_docs(query: str, session_minute: float, company: str = "") -> list[dict]:
+def search_company_docs(query: str, session_minute: float, company: str = "", scenario: str = "") -> list[dict]:
     """회사 문서에서 query와 관련된 문단을 찾아 문서 제목과 함께 반환한다.
 
     지금 공개된 문서만 검색한다. 결과의 title을 답변의 출처로 밝힌다.
@@ -54,18 +55,19 @@ def search_company_docs(query: str, session_minute: float, company: str = "") ->
     if not tokens:
         raise ValueError("검색어가 비어 있습니다. 2글자 이상 단어를 넣어 주세요.")
     rag_cfg = settings.config()["rag"]
-    open_docs = docs.available(company, session_minute)
+    pack = scenario or None
+    open_docs = docs.available(company, session_minute, pack)
     results = None
     if rag_cfg["search_mode"] == "vector":
         try:
-            results = _vector_search(query, tokens, company, open_docs, rag_cfg)
+            results = _vector_search(query, tokens, company, open_docs, rag_cfg, pack)
         except Exception:   # 임베딩 실패 시 키워드 검색으로 대신 찾는다(원인은 stderr 로그)
             log.exception("벡터 검색 실패, 키워드 검색으로 대체")
     if results is None:
-        results = _keyword_search(tokens, company, open_docs, rag_cfg)
+        results = _keyword_search(tokens, company, open_docs, rag_cfg, pack)
     # 아직 공개되지 않은 문서를 지목한 검색이면, 다른 문서로 대신 답하지 않도록 사실을 알린다.
     open_ids = {d["id"] for d in open_docs}
-    for doc in docs.all_docs(company):
+    for doc in docs.all_docs(company, pack):
         if doc["id"] not in open_ids and _score(tokens, doc["title"]) >= 2:
             results.insert(0, {"doc_id": doc["id"], "title": doc["title"],
                                "notice": f"'{doc['title']}' 문서는 아직 공유되지 않았습니다."})
@@ -73,10 +75,10 @@ def search_company_docs(query: str, session_minute: float, company: str = "") ->
 
 
 def _vector_search(query: str, tokens: list[str], company: str, open_docs: list[dict],
-                   rag_cfg: dict) -> list[dict]:
+                   rag_cfg: dict, pack: str | None = None) -> list[dict]:
     """미리 색인한 임베딩으로 공개된 문서의 문단을 찾는다. 질문이 제목을 지목하면 가중치를 더한다."""
     titles = {d["id"]: d["title"] for d in open_docs}
-    hits = embedding.search(query, company, set(titles))
+    hits = embedding.search(query, company, set(titles), pack)
     for h in hits:
         if _score(tokens, titles[h["doc_id"]]):
             h["score"] += rag_cfg["vector_title_bonus"]
@@ -85,12 +87,13 @@ def _vector_search(query: str, tokens: list[str], company: str, open_docs: list[
              "score": round(h["score"], 3), "via": "vector"} for h in hits[:rag_cfg["top_k"]]]
 
 
-def _keyword_search(tokens: list[str], company: str, open_docs: list[dict], rag_cfg: dict) -> list[dict]:
+def _keyword_search(tokens: list[str], company: str, open_docs: list[dict], rag_cfg: dict,
+                    pack: str | None = None) -> list[dict]:
     """키워드 일치 수로 문단을 찾는다. 질문이 문서를 지목하면("인터뷰 요약에서…") 그 문서를 우선한다."""
     hits = []
     for doc in open_docs:
         title_bonus = _score(tokens, doc["title"]) * rag_cfg["title_match_weight"]
-        for para in docs.body(company, doc["id"]).split("\n\n"):
+        for para in docs.body(company, doc["id"], pack).split("\n\n"):
             score = _score(tokens, para)
             if score:
                 hits.append((score + title_bonus, doc, para.strip()))
@@ -100,14 +103,15 @@ def _keyword_search(tokens: list[str], company: str, open_docs: list[dict], rag_
 
 
 @mcp.tool(annotations=READ)
-def read_company_doc(doc_id: str, session_minute: float, company: str = "") -> dict:
+def read_company_doc(doc_id: str, session_minute: float, company: str = "", scenario: str = "") -> dict:
     """회사 문서 전문을 반환한다. 아직 공개되지 않은 문서는 읽을 수 없다."""
-    known = {d["id"]: d for d in docs.all_docs(company)}
+    pack = scenario or None
+    known = {d["id"]: d for d in docs.all_docs(company, pack)}
     if doc_id not in known:
         raise ValueError(f"없는 문서입니다: {doc_id}. list_company_docs로 목록을 확인하세요.")
     if known[doc_id]["available_from_minute"] > session_minute:
         raise ValueError(f"'{known[doc_id]['title']}' 문서는 아직 공유되지 않았습니다.")
-    return {"doc_id": doc_id, "title": known[doc_id]["title"], "body": docs.body(company, doc_id)}
+    return {"doc_id": doc_id, "title": known[doc_id]["title"], "body": docs.body(company, doc_id, pack)}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
@@ -136,19 +140,19 @@ def read_doc_resource(session_id: str, doc_id: str) -> str:
         s = store.get_session(session_id)
     except KeyError as exc:
         raise ValueError("없는 세션입니다.") from exc
-    minute, company = clock.minute_of(s["sim_seconds"]), s["company"]
-    known = {d["id"]: d for d in docs.all_docs(company)}
+    minute, company, pack = clock.minute_of(s["sim_seconds"]), s["company"], s["scenario"]
+    known = {d["id"]: d for d in docs.all_docs(company, pack)}
     if doc_id not in known:
         raise ValueError(f"없는 문서입니다: {doc_id}")
     if known[doc_id]["available_from_minute"] > minute:
         raise PermissionError(f"'{known[doc_id]['title']}' 문서는 아직 공유되지 않았습니다.")
-    return docs.body(company, doc_id)
+    return docs.body(company, doc_id, pack)
 
 
-@mcp.resource("scenario://brief")
-def read_brief() -> str:
-    """과제 브리프와 기본 분담안 (모든 지원자에게 공개된 내용)."""
-    return (settings.ROOT / "scenario" / "brief.md").read_text(encoding="utf-8")
+@mcp.resource("scenario://{pack}/brief")
+def read_brief(pack: str) -> str:
+    """시나리오 팩의 과제 브리프와 기본 분담안 (그 팩의 모든 지원자에게 공개된 내용)."""
+    return settings.brief(pack)
 
 
 if __name__ == "__main__":

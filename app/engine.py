@@ -29,7 +29,7 @@ async def tick(session_id: str, now: float | None = None) -> dict:
     store.update_session(session_id, sim_seconds=sim, last_seen=now)
     minute = clock.minute_of(sim)
 
-    for scene in clock.due_scenes(settings.scenes(), minute, store.run_scene_ids(session_id)):
+    for scene in clock.due_scenes(settings.scenes(s["scenario"]), minute, store.run_scene_ids(session_id)):
         if not store.claim_scene(session_id, scene["id"], minute):
             continue   # 다른 요청이 이미 실행 중 (F-23 중복 방지)
         try:
@@ -78,7 +78,7 @@ async def ask_assistant(session_id: str, text: str, now: float | None = None) ->
 
 def save_part(session_id: str, part: str, content: str) -> None:
     """지원자가 기획안 파트를 저장한다(자동 저장, F-13). 동료 파트 키(coworker:*)는 쓸 수 없다."""
-    if part not in settings.PART_TITLES:
+    if part not in settings.PART_IDS:
         raise ValueError(f"없는 파트: {part}")
     s = store.get_session(session_id)
     store.upsert_part(session_id, part, content, clock.minute_of(s["sim_seconds"]))

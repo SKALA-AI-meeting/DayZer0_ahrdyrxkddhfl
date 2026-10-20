@@ -8,7 +8,7 @@ import sqlite3
 import time
 import uuid
 
-from app.settings import PART_TITLES, db_path, default_assignment
+from app.settings import db_path, default_assignment, default_pack, part_titles
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     email TEXT NOT NULL DEFAULT '',
     invite_token TEXT UNIQUE,          -- 초대 링크 토큰(F-02). 지원자 인증 수단
     invite_expires_at REAL,
-    consented INTEGER NOT NULL DEFAULT 0
+    consented INTEGER NOT NULL DEFAULT 0,
+    scenario TEXT NOT NULL DEFAULT 'moarun'   -- 시나리오 팩(채용 건마다 하나)
 );
 -- 기업 관리자 계정(F-01). 비밀번호는 salt + PBKDF2 해시로만 저장한다.
 CREATE TABLE IF NOT EXISTS admins (
@@ -139,27 +140,32 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # 이전 DB 파일에 시나리오 팩 컬럼이 없으면 추가한다(기존 세션은 기본 팩)
+    if "scenario" not in {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}:
+        conn.execute("ALTER TABLE sessions ADD COLUMN scenario TEXT NOT NULL DEFAULT 'moarun'")
     return conn
 
 
 def create_session(alias: str, *, company: str = "", email: str = "",
                    status: str = "in_progress", invite_token: str | None = None,
-                   invite_expires_at: float | None = None) -> str:
+                   invite_expires_at: float | None = None, scenario: str | None = None) -> str:
     """세션과 기본 태스크 보드를 만들고 세션 id를 반환한다.
 
     초대(F-02)로 만들 때는 status="invited"와 초대 토큰·만료 시각을 넘긴다.
     """
     session_id = uuid.uuid4().hex[:12]
     assignment = default_assignment()
+    scenario = scenario or default_pack()
+    titles = part_titles(scenario)
     with connect() as conn:
         conn.execute(
             "INSERT INTO sessions (id, alias, status, phase, assignment, created_at, company, email,"
-            " invite_token, invite_expires_at) VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?)",
+            " invite_token, invite_expires_at, scenario) VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?)",
             (session_id, alias, status, json.dumps(assignment), time.time(), company, email,
-             invite_token, invite_expires_at))
+             invite_token, invite_expires_at, scenario))
         conn.executemany(
             "INSERT INTO tasks (session_id, part, title, owner, status) VALUES (?, ?, ?, ?, 'todo')",
-            [(session_id, part, PART_TITLES[part], owner) for part, owner in assignment.items()])
+            [(session_id, part, titles[part], owner) for part, owner in assignment.items()])
     return session_id
 
 
@@ -354,7 +360,7 @@ def list_sessions(company: str) -> list[dict]:
     """기업의 지원자 세션 목록(F-03). 다른 기업 세션은 포함하지 않는다(F-01)."""
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, alias, email, status, created_at FROM sessions WHERE company = ?"
+            "SELECT id, alias, email, status, scenario, created_at FROM sessions WHERE company = ?"
             " ORDER BY created_at DESC", (company,))
         return [dict(r) for r in rows]
 
@@ -436,11 +442,13 @@ def doc_views(session_id: str) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def chunk_index(company: str, model: str) -> list[dict]:
-    """기업 기준 색인된 문단 목록(시나리오 문서는 company='')."""
+def chunk_index(owners: list[str], model: str) -> list[dict]:
+    """소유자(팩 키 'pack:<id>' 또는 기업 이름) 기준 색인된 문단 목록."""
+    owners = [o for o in owners if o]
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM doc_chunks WHERE company IN ('', ?) AND model = ?",
-                            (company, model))
+        rows = conn.execute(
+            f"SELECT * FROM doc_chunks WHERE company IN ({','.join('?' * len(owners))}) AND model = ?",
+            (*owners, model))
         return [{**dict(r), "embedding": json.loads(r["embedding"])} for r in rows]
 
 

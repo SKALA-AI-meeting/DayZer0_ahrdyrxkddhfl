@@ -4,14 +4,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import Nav from "@/components/Nav";
-import { api, Msg, NAME } from "@/lib/api";
+import { api, Msg } from "@/lib/api";
 
 type Observed = { behavior: string; quote: string; when: string };
 type Section = {
   element: string; situation: string; observed: Observed[]; note?: string;
   requests?: { when: string; request: string; reuse: string }[];
 };
-type Data = { alias: string; status: string; report: { sections: Section[]; disclaimer: string } | null;
+type Data = { alias: string; status: string; names: Record<string, string>; pack: { company: string; task_title: string }; report: { sections: Section[]; disclaimer: string } | null;
   report_state: string | null; messages: Msg[] };
 
 export default function ReportPage() {
@@ -40,6 +40,7 @@ export default function ReportPage() {
     <main className="page">
       <Link href="/admin">← 지원자 목록</Link>
       <h1 style={{ marginTop: 8 }}>{data.alias} 관찰 리포트</h1>
+      <p className="muted">시나리오: {data.pack.company} · {data.pack.task_title}</p>
       {!data.report ? (
         <div className="card muted">리포트 상태: {data.report_state ?? "생성 전"}</div>
       ) : (
@@ -75,7 +76,7 @@ export default function ReportPage() {
         {data.messages.map((m) => (
           <div key={m.id} id={`m${m.id}`} className={`msgline ${focus === m.id ? "highlight" : ""}`}>
             <span className="muted">[{m.time}][{m.channel}]</span>{" "}
-            <span className="who">{m.sender === "candidate" ? data.alias : NAME[m.sender]}</span>{m.content}
+            <span className="who">{m.sender === "candidate" ? data.alias : data.names[m.sender]}</span>{m.content}
           </div>
         ))}
       </div>

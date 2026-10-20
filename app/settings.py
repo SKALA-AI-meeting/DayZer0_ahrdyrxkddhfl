@@ -1,7 +1,10 @@
 """config.toml, scenario/, prompts/ 를 읽는 모듈.
 
-사람이 고른 숫자는 config.toml, 시나리오 내용은 scenario/, 페르소나 지시문은 prompts/ 에 있다.
+사람이 고른 숫자는 config.toml, 시나리오 내용은 scenario/<팩>/, 페르소나 지시문은 prompts/ 에 있다.
 코드에는 숫자·문장을 직접 쓰지 않고 여기서 읽어 쓴다.
+
+시나리오 팩: 기업(채용 건)마다 하나를 고른다(scenario/packs.toml). 팩마다 회사·과제·문서·대사는 다르고
+이벤트 id·시점·관찰 요소는 같아서, 에이전트 코드는 그대로 두고 데이터만 갈아끼운다.
 """
 import os
 import tomllib
@@ -12,6 +15,7 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 SECONDS_PER_MINUTE = 60
+PART_IDS = ("1", "2", "3", "4", "5")   # 기획안 파트 번호(모든 팩 공통, PRD 6.2 구조)
 # 모든 모듈이 이 파일을 먼저 불러오므로 여기서 .env를 읽는다.
 # override=True: 셸에 같은 이름의 변수(예: 다른 OPENAI_API_KEY)가 있어도 이 프로젝트 값을 쓴다.
 load_dotenv(ROOT / ".env", override=True)
@@ -23,77 +27,123 @@ def config() -> dict:
     return tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
 
 
+# ---------- 시나리오 팩 ----------
+
 @lru_cache
-def scenes() -> tuple[dict, ...]:
+def _packs_file() -> dict:
+    return tomllib.loads((ROOT / "scenario" / "packs.toml").read_text(encoding="utf-8"))
+
+
+def default_pack() -> str:
+    return _packs_file()["default"]
+
+
+def pack_ids() -> list[str]:
+    return [p["id"] for p in _packs_file()["pack"]]
+
+
+def _dir(pack: str | None) -> Path:
+    pack = pack or default_pack()
+    for p in _packs_file()["pack"]:
+        if p["id"] == pack:
+            return ROOT / "scenario" / p["dir"]
+    raise KeyError(f"없는 시나리오 팩: {pack}")
+
+
+@lru_cache
+def pack_info(pack: str | None = None) -> dict:
+    """팩의 회사·서비스·등장인물·파트 제목(scenario/<팩>/pack.toml)."""
+    data = tomllib.loads((_dir(pack) / "pack.toml").read_text(encoding="utf-8"))
+    return {"id": pack or default_pack(), **data}
+
+
+def part_titles(pack: str | None = None) -> dict[str, str]:
+    return dict(pack_info(pack)["part_titles"])
+
+
+def names(pack: str | None = None) -> dict[str, str]:
+    """화면·대화 기록용 이름. 역할 키(coworker, lead)는 모든 팩 공통."""
+    info = pack_info(pack)
+    return {"candidate": "지원자", "coworker": info["coworker_name"], "lead": f"{info['lead_name']} 팀장",
+            "system": "시스템", "assistant": "AI 어시스턴트", "both": "함께"}
+
+
+@lru_cache
+def scenes(pack: str | None = None) -> tuple[dict, ...]:
     """세션 장면(킥오프·이벤트·마감)을 시점 순서로 반환한다."""
-    data = tomllib.loads((ROOT / "scenario" / "events.toml").read_text(encoding="utf-8"))
+    data = tomllib.loads((_dir(pack) / "events.toml").read_text(encoding="utf-8"))
     return tuple(sorted(data["scene"], key=lambda s: s["at_minute"]))
 
 
-def scene_by_id(scene_id: str) -> dict:
+def scene_by_id(scene_id: str, pack: str | None = None) -> dict:
     """장면 id로 장면 정의를 찾는다.
 
     Raises:
         KeyError: 없는 장면 id.
     """
-    for scene in scenes():
+    for scene in scenes(pack):
         if scene["id"] == scene_id:
             return scene
     raise KeyError(f"정의되지 않은 장면: {scene_id}")
 
 
 @lru_cache
-def docs_index() -> tuple[dict, ...]:
+def docs_index(pack: str | None = None) -> tuple[dict, ...]:
     """회사 문서 목록(id, title, file, available_from_minute)을 반환한다."""
-    data = tomllib.loads((ROOT / "scenario" / "docs" / "index.toml").read_text(encoding="utf-8"))
+    data = tomllib.loads((_dir(pack) / "docs" / "index.toml").read_text(encoding="utf-8"))
     return tuple(data["doc"])
 
 
 @lru_cache
-def doc_text(doc_id: str) -> str:
+def doc_text(doc_id: str, pack: str | None = None) -> str:
     """회사 문서 본문을 반환한다.
 
     Raises:
         KeyError: 없는 문서 id.
     """
-    for doc in docs_index():
+    for doc in docs_index(pack):
         if doc["id"] == doc_id:
-            return (ROOT / "scenario" / "docs" / doc["file"]).read_text(encoding="utf-8")
+            return (_dir(pack) / "docs" / doc["file"]).read_text(encoding="utf-8")
     raise KeyError(f"없는 문서: {doc_id}")
 
 
 @lru_cache
-def observation_spec() -> dict:
-    """관찰 항목 정의(scenario/observation.toml)를 반환한다."""
-    return tomllib.loads((ROOT / "scenario" / "observation.toml").read_text(encoding="utf-8"))
+def observation_spec(pack: str | None = None) -> dict:
+    """관찰 항목 정의(scenario/<팩>/observation.toml)를 반환한다."""
+    return tomllib.loads((_dir(pack) / "observation.toml").read_text(encoding="utf-8"))
 
 
 @lru_cache
-def coworker_parts() -> tuple[dict, ...]:
+def coworker_parts(pack: str | None = None) -> tuple[dict, ...]:
     """01:30에 동료가 공유하는 자기 파트 내용을 반환한다."""
-    data = tomllib.loads((ROOT / "scenario" / "coworker_parts.toml").read_text(encoding="utf-8"))
+    data = tomllib.loads((_dir(pack) / "coworker_parts.toml").read_text(encoding="utf-8"))
     return tuple(data["part"])
 
 
+def brief(pack: str | None = None) -> str:
+    return (_dir(pack) / "brief.md").read_text(encoding="utf-8")
+
+
+# ---------- 프롬프트 ----------
+
 @lru_cache
-def prompt(name: str) -> str:
-    """prompts/{name}.md 를 읽는다."""
+def _prompt_raw(name: str) -> str:
     return (ROOT / "prompts" / f"{name}.md").read_text(encoding="utf-8").strip()
+
+
+def prompt(name: str, pack: str | None = None) -> str:
+    """prompts/{name}.md 를 읽고 {company}, {coworker_name} 같은 자리에 팩 값을 넣는다."""
+    text = _prompt_raw(name)
+    for key, value in pack_info(pack).items():
+        if isinstance(value, str):
+            text = text.replace("{" + key + "}", value)
+    return text
 
 
 @lru_cache
 def default_assignment() -> dict[str, str]:
-    """PRD 6.2 기본 분담안. 파트 번호(문자열) → 담당자."""
+    """PRD 6.2 기본 분담안. 파트 번호(문자열) → 담당자 (모든 팩 공통)."""
     return {"1": "candidate", "2": "candidate", "3": "both", "4": "coworker", "5": "coworker"}
-
-
-PART_TITLES = {
-    "1": "문제 정의와 대상 사용자",
-    "2": "사용자 인터뷰에서 찾은 근거",
-    "3": "핵심 기능 제안",
-    "4": "비슷한 서비스 사례",
-    "5": "성공 지표와 출시 일정",
-}
 
 
 def db_path() -> Path:

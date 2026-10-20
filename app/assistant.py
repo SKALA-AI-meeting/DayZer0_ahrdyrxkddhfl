@@ -16,18 +16,20 @@ log = logging.getLogger("dayzero.assistant")
 async def ask(session_id: str, minute: float, text: str) -> str:
     """지원자 요청에 답하고 기록한다."""
     store.add_message(session_id, "assistant", "candidate", text, minute)
-    company = store.get_session(session_id)["company"]
+    session = store.get_session(session_id)
+    company, pack = session["company"], session["scenario"]
     if guard.is_evaluation_question(text):
         answer = guard.notice()
     else:
-        system = (f"{prompt('assistant')}\n\n## 지금 볼 수 있는 회사 문서\n"
-                  f"{persona.docs_text(minute, company)}\n이 목록에 없는 문서는 아직 볼 수 없다.")
+        system = (f"{prompt('assistant', pack)}\n\n## 지금 볼 수 있는 회사 문서\n"
+                  f"{persona.docs_text(minute, company, pack)}\n이 목록에 없는 문서는 아직 볼 수 없다.")
         human = (f"이전 대화:\n{await persona.context(session_id, ('assistant',))}\n\n"
                  "가장 마지막 사용자 요청에 답하라.")
         try:
             result = await speak_graph.speak(
                 session_id=session_id, node="assistant", system=system, human=human, minute=minute,
-                use_tools=True, fallback=config()["verify"]["fallback_assistant"], company=company)
+                use_tools=True, fallback=config()["verify"]["fallback_assistant"], company=company,
+                scenario=pack)
             answer = result["text"]
         except Exception:   # 재시도 후에도 실패하면 정해진 문장으로 답한다(원인은 로그에)
             log.exception("어시스턴트 응답 실패: session=%s", session_id)

@@ -33,8 +33,8 @@ export const STATUS_LABEL: Record<string, string> = {
 
 export const NAME: Record<string, string> = {
   candidate: "나",
-  coworker: "이도현",
-  lead: "한서윤 팀장",
+  coworker: "동료",
+  lead: "팀장",
   system: "알림",
   assistant: "AI 어시스턴트",
   both: "함께",

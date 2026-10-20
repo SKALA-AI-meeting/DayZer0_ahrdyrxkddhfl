@@ -3,7 +3,7 @@
 //            · AI 어시스턴트(F-16) · 남은 시간·제출(F-17)
 // 서버에 poll_interval_seconds마다 /poll을 불러 새 메시지와 상태를 받는다.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Msg, NAME } from "@/lib/api";
+import { api, Msg } from "@/lib/api";
 
 type Task = { part: string; title: string; owner: string; status: string };
 type Poll = {
@@ -12,6 +12,8 @@ type Poll = {
   coworker_parts: Record<string, string>; docs: { id: string; title: string }[];
   part_titles: Record<string, string>; poll_interval_seconds: number; time_scale: number;
   activity: { actor: string; label: string; node: string }[];
+  names: Record<string, string>;
+  pack: { company: string; task_title: string; coworker_name: string; coworker_short: string; lead_name: string; lead_short: string };
 };
 
 const SAVE_DELAY_MS = 1000; // 입력이 멈춘 뒤 자동 저장까지 기다리는 시간(UI 반응성용)
@@ -137,12 +139,16 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
   const chat = messages.filter((m) => (tab === "team" ? ["team", "system"] : ["dm"]).includes(m.channel));
   const assistantLog = messages.filter((m) => m.channel === "assistant");
   const STATUS: Record<string, string> = { todo: "할 일", doing: "진행 중", done: "완료" };
+  // 이름은 세션의 시나리오 팩에서 온다(회사마다 등장인물이 다름)
+  const N: Record<string, string> = { ...state.names, candidate: "나" };
+  const INITIAL: Record<string, string> = { candidate: "나", coworker: state.pack.coworker_short,
+    lead: state.pack.lead_short, assistant: "AI" };
 
   return (
     <div className="office">
       <div className="topbar">
         <span className="row"><span className="logo">Day <span>Zer0</span></span>
-          <span className="muted">루프랩 · 모아런 신규 기능 기획</span></span>
+          <span className="muted">{state.pack.company} · {state.pack.task_title}</span></span>
         <span className="row">남은 시간 <span className={`timer ${(shown ?? state.remaining) < 10 ? "low" : ""}`}>{mmss(shown ?? state.remaining)}</span></span>
         <button onClick={submit}>기획안 제출</button>
       </div>
@@ -151,27 +157,27 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
       <section className="col">
         <div className="tabs">
           <button className={tab === "team" ? "active" : ""} onClick={() => setTab("team")}># 팀 채널</button>
-          <button className={tab === "dm" ? "active" : ""} onClick={() => setTab("dm")}>이도현 · 1:1</button>
+          <button className={tab === "dm" ? "active" : ""} onClick={() => setTab("dm")}>{state.pack.coworker_name} · 1:1</button>
         </div>
         <div className="chat">
           {chat.length === 0 && <div className="typing">아직 메시지가 없어요.</div>}
           {chat.map((m) => m.sender === "system" ? (
             <div key={m.id} className="sysmsg">{m.time} · {m.content}</div>
           ) : (
-            <Bubble key={m.id} m={m} />
+            <Bubble key={m.id} m={m} names={N} initials={INITIAL} />
           ))}
           {/* 진행 이벤트: 서버가 알려 주는 AI의 현재 작업(Graph 노드) */}
           {state.activity.filter((a) => a.actor === (tab === "dm" ? "coworker" : "lead")).map((a) => (
-            <div key={a.actor} className="typing">{NAME[a.actor]}님이 {a.label}…</div>
+            <div key={a.actor} className="typing">{N[a.actor]}님이 {a.label}…</div>
           ))}
           {busy && !state.activity.some((a) => a.actor === (tab === "dm" ? "coworker" : "lead")) && (
-            <div className="typing">{tab === "dm" ? "이도현" : "한서윤 팀장"}님이 입력 중…</div>
+            <div className="typing">{tab === "dm" ? N.coworker : N.lead}님이 입력 중…</div>
           )}
         </div>
         <div className="composer">
           <textarea rows={2} value={draft} onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
-            placeholder={tab === "team" ? "팀 채널에 메시지 (Enter 전송, Shift+Enter 줄바꿈)" : "이도현에게 메시지"} />
+            placeholder={tab === "team" ? "팀 채널에 메시지 (Enter 전송, Shift+Enter 줄바꿈)" : `${N.coworker}에게 메시지`} />
           <button onClick={send} disabled={busy}>보내기</button>
         </div>
         {error && <div className="error" onClick={() => setError("")}>{error}</div>}
@@ -180,19 +186,19 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
       {/* 공유 문서: 기획안 5파트 */}
       <section className="col">
         <div><h2 style={{ marginBottom: 2 }}>공유 문서 · 기획안</h2>
-          <span className="muted small">입력하면 자동 저장됩니다. 편집은 나만 할 수 있고, 이도현·팀장은 읽을 수 있어요. 동료가 공유한 내용은 파란 상자로 보여요.</span></div>
+          <span className="muted small">입력하면 자동 저장됩니다. 편집은 나만 할 수 있고, {N.coworker}·팀장은 읽을 수 있어요. 동료가 공유한 내용은 파란 상자로 보여요.</span></div>
         {Object.entries(state.part_titles).map(([part, title]) => {
           const owner = state.tasks.find((t) => t.part === part)?.owner ?? "candidate";
           return (
             <div className="part" key={part}>
-              <h3>{part}. {title} <span className={`owner ${owner}`}>{NAME[owner]}</span></h3>
+              <h3>{part}. {title} <span className={`owner ${owner}`}>{N[owner]}</span></h3>
               <textarea rows={4} value={parts[part] ?? ""} onChange={(e) => editPart(part, e.target.value)}
                 placeholder="여기에 작성하세요." />
               {state.coworker_parts[part] ? (
-                <div className="shared"><b>이도현 공유</b>{"\n"}{state.coworker_parts[part]}</div>
+                <div className="shared"><b>{N.coworker} 공유</b>{"\n"}{state.coworker_parts[part]}</div>
               ) : owner !== "candidate" && (
                 <div className="muted small" style={{ marginTop: 6 }}>
-                  이도현 담당 · 작업 중이에요. 완성되면 여기에 공유돼요.
+                  {N.coworker} 담당 · 작업 중이에요. 완성되면 여기에 공유돼요.
                 </div>
               )}
             </div>
@@ -206,7 +212,7 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
           <h2>태스크 보드</h2>
           {state.tasks.map((t) => (
             <div className="task" key={t.part}>
-              <span>{t.part}. {t.title} <span className={`owner ${t.owner}`}>{NAME[t.owner]}</span></span>
+              <span>{t.part}. {t.title} <span className={`owner ${t.owner}`}>{N[t.owner]}</span></span>
               {["candidate", "both"].includes(t.owner) ? (
                 <select value={t.status} onChange={(e) => setTask(t.part, e.target.value)} style={{ width: 96 }}>
                   <option value="todo">할 일</option><option value="doing">진행 중</option><option value="done">완료</option>
@@ -228,7 +234,7 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
             <span className="muted small">업무용 도구 · 회사 문서를 참고해 답해요</span></div>
           <div className="chat">
             {assistantLog.length === 0 && <div className="typing">질문, 요약, 초안 작성을 요청해 보세요.</div>}
-            {assistantLog.map((m) => <Bubble key={m.id} m={m} />)}
+            {assistantLog.map((m) => <Bubble key={m.id} m={m} names={N} initials={INITIAL} />)}
             {state.activity.filter((a) => a.actor === "assistant").map((a) => (
               <div key={a.actor} className="typing">AI 어시스턴트가 {a.label}…</div>
             ))}
@@ -244,14 +250,12 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
   );
 }
 
-const INITIAL: Record<string, string> = { candidate: "나", coworker: "도현", lead: "서윤", assistant: "AI" };
-
-function Bubble({ m }: { m: Msg }) {
+function Bubble({ m, names, initials }: { m: Msg; names: Record<string, string>; initials: Record<string, string> }) {
   const mine = m.sender === "candidate";
   return (
     <div className={`bubble-row ${mine ? "mine" : ""}`}>
-      <span className={`avatar ${m.sender}`}>{INITIAL[m.sender] ?? "?"}</span>
-      <div className="bubble"><span className="meta">{mine ? "" : `${NAME[m.sender]} · `}{m.time}</span>{m.content}</div>
+      <span className={`avatar ${m.sender}`}>{initials[m.sender] ?? "?"}</span>
+      <div className="bubble"><span className="meta">{mine ? "" : `${names[m.sender]} · `}{m.time}</span>{m.content}</div>
     </div>
   );
 }

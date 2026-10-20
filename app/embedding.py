@@ -48,17 +48,23 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def ensure_index(company: str = "") -> int:
-    """시나리오 문서와 기업 문서의 색인을 최신으로 맞춘다. 새로 임베딩한 문단 수를 반환한다."""
+def _pack_owner(pack: str | None) -> str:
+    """팩 문서 색인의 소유자 키. 팩마다 같은 doc_id가 있어도 섞이지 않게 나눈다."""
+    from app.settings import default_pack
+    return f"pack:{pack or default_pack()}"
+
+
+def ensure_index(company: str = "", pack: str | None = None) -> int:
+    """팩 문서와 기업 문서의 색인을 최신으로 맞춘다. 새로 임베딩한 문단 수를 반환한다."""
     model = _model()
     have = {}
-    for c in store.chunk_index(company, model):
+    for c in store.chunk_index([_pack_owner(pack), company], model):
         have.setdefault((c["company"], c["doc_id"]), set()).add(c["content_hash"])
     company_ids = {c["doc_id"] for c in store.company_docs(company)} if company else set()
     embedded = 0
-    for d in docs.all_docs(company):
-        owner = company if d["id"] in company_ids else ""
-        body = docs.body(company, d["id"])
+    for d in docs.all_docs(company, pack):
+        owner = company if d["id"] in company_ids else _pack_owner(pack)
+        body = docs.body(company, d["id"], pack)
         parts = chunks_of(f"# {d['title']}\n\n{body}")
         hashes = [_hash(p) for p in parts]
         if have.get((owner, d["id"])) == set(hashes):
@@ -87,18 +93,18 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-def search(query: str, company: str, allowed_doc_ids: set[str]) -> list[dict]:
+def search(query: str, company: str, allowed_doc_ids: set[str], pack: str | None = None) -> list[dict]:
     """공개된 문서(allowed_doc_ids)의 문단을 질문과의 유사도 순으로 [{doc_id, text, score}].
 
     자르기(top_k)와 제목 가중치는 호출하는 쪽(rag-mcp)이 한다.
     """
-    ensure_index(company)
+    ensure_index(company, pack)
     qv = query_vector(query)
     company_ids = {c["doc_id"] for c in store.company_docs(company)} if company else set()
     hits = []
-    for c in store.chunk_index(company, _model()):
-        # 기업이 교체한 문서는 기업 색인만, 나머지는 시나리오 색인만 쓴다
-        owner_ok = (c["company"] == company) if c["doc_id"] in company_ids else (c["company"] == "")
+    for c in store.chunk_index([_pack_owner(pack), company], _model()):
+        # 기업이 교체한 문서는 기업 색인만, 나머지는 그 팩의 색인만 쓴다
+        owner_ok = (c["company"] == company) if c["doc_id"] in company_ids else (c["company"] == _pack_owner(pack))
         if c["doc_id"] in allowed_doc_ids and owner_ok:
             hits.append({"doc_id": c["doc_id"], "text": c["text"], "score": cosine(qv, c["embedding"])})
     hits.sort(key=lambda h: h["score"], reverse=True)

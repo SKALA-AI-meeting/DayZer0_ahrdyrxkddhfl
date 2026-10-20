@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from app import llm, persona, store
 from app.mcp_client import call_business
-from app.settings import PART_TITLES, config, coworker_parts, scene_by_id
+from app.settings import config, coworker_parts, names, scene_by_id
 
 log = logging.getLogger("dayzero.graph")
 ALL_CHANNELS = ("team", "dm", "system")
@@ -30,6 +30,7 @@ ALL_CHANNELS = ("team", "dm", "system")
 class TurnState(TypedDict, total=False):
     session_id: str
     minute: float
+    scenario: str            # 시나리오 팩(기업 맞춤 시나리오)
     trigger: dict            # {"kind": "scene", "scene_id": ...} | {"kind": "candidate", "channel": ..., "text": ...}
     phase: str               # waiting | negotiate | work | done
     negotiation_round: int
@@ -66,7 +67,7 @@ def _post(state: TurnState, channel: str, sender: str, text: str) -> None:
 
 async def run_scene(state: TurnState) -> TurnState:
     """시나리오 장면을 실행한다. 전달 내용은 고정, 문장만 페르소나가 자연스럽게 바꾼다(PRD 6.4)."""
-    scene = scene_by_id(state["trigger"]["scene_id"])
+    scene = scene_by_id(state["trigger"]["scene_id"], state["scenario"])
     sid, update = state["session_id"], {}
     if scene["speaker"] == "system":
         _post(state, "system", "system", scene["message"])
@@ -76,7 +77,7 @@ async def run_scene(state: TurnState) -> TurnState:
         update = {"phase": "negotiate"}
     shared = []
     if scene.get("shares_coworker_parts"):
-        for part in coworker_parts():
+        for part in coworker_parts(state["scenario"]):
             key = str(part["part"])
             # 지원자가 맡기로 한 파트는 덮어쓰지 않는다. 3번(핵심 기능)은 이벤트 내용이므로 항상 공유.
             if key == "3" or state["assignment"].get(key) != "candidate":
@@ -85,7 +86,7 @@ async def run_scene(state: TurnState) -> TurnState:
         # 공유 내용은 코드가 원문 그대로 붙인다(F-23 정해진 내용). LLM은 인사만 하고 특정 항목을 짚지 않는다.
         nums = ", ".join(s.split("번", 1)[0].strip("[") + "번" for s in shared)
         # 지원자가 3번을 혼자 맡았을 수도 있으므로 "내가 맡은"이라고 단정하지 않는다(사실과 다른 말 방지).
-        task = (f"기획안 {nums}에 넣을 너(이도현)의 작업 내용을 공유 문서에 올렸으니, 지원자에게 "
+        task = (f"기획안 {nums}에 넣을 너({names(state['scenario'])['coworker']})의 작업 내용을 공유 문서에 올렸으니, 지원자에게 "
                 "리뷰해 달라고 한두 문장으로 짧게 부탁하라. '내가 맡은 파트'라고 단정하지 마라. "
                 "지원자를 '도현님'이라고 부르지 마라. 내용을 요약하거나 특정 항목을 언급하지 마라.")
     # 장면 대사는 필수 내용(must_include)이 들어갔는지 코드가 검증하고, 끝내 빠지면 원문 대사를 쓴다(F-23).
@@ -112,7 +113,7 @@ async def check_agreement(state: TurnState) -> TurnState:
         Agreement, method="function_calling")
     result: Agreement = await llm.ainvoke(judge, [
         SystemMessage("동료가 제안한 업무 분담안에 대한 지원자의 답을 분류한다. 추측하지 말고 메시지에 있는 내용만 본다."),
-        HumanMessage(f"현재 분담안: {persona.assignment_text(state['assignment'])}\n"
+        HumanMessage(f"현재 분담안: {persona.assignment_text(state['assignment'], state['scenario'])}\n"
                      f"지원자 메시지: {state['trigger']['text']}")], "graph.check_agreement",
         state["session_id"])
     return {"about_split": result.about_split, "agreed": result.agreed,
@@ -135,7 +136,7 @@ async def counter_proposal(state: TurnState) -> TurnState:
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"지원자의 요청을 반영한 분담안을 다시 제안하고 이대로 괜찮은지 물어라: "
-        f"{persona.assignment_text(assignment)}", ALL_CHANNELS, use_tools=False)
+        f"{persona.assignment_text(assignment, state['scenario'])}", ALL_CHANNELS, use_tools=False)
     _post(state, "dm", "coworker", text)
     return {"assignment": assignment, "negotiation_round": rounds}
 
@@ -152,7 +153,7 @@ async def apply_assignment(state: TurnState) -> TurnState:
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"분담을 확정했다고 짧게 알리고 태스크 보드에 반영했다고 말하라: "
-        f"{persona.assignment_text(assignment)}{note}", ALL_CHANNELS, use_tools=False)
+        f"{persona.assignment_text(assignment, state['scenario'])}{note}", ALL_CHANNELS, use_tools=False)
     _post(state, "dm", "coworker", text)
     return {"assignment": assignment, "phase": "work", "negotiation_round": rounds}
 
@@ -183,7 +184,7 @@ async def finalize_split(state: TurnState) -> TurnState:
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"분담 얘기가 아직 안 끝났지만 시간이 됐으니 일단 지금 안으로 진행하자고 부드럽게 알리고, "
-        f"태스크 보드에 반영했다고 말하라: {persona.assignment_text(assignment)}",
+        f"태스크 보드에 반영했다고 말하라: {persona.assignment_text(assignment, state['scenario'])}",
         ALL_CHANNELS, use_tools=False)
     _post(state, "dm", "coworker", text)
     return {"phase": "work"}
@@ -192,7 +193,7 @@ async def finalize_split(state: TurnState) -> TurnState:
 def route_entry(state: TurnState) -> str:
     trigger = state["trigger"]
     if trigger["kind"] == "scene":
-        is_event = bool(scene_by_id(trigger["scene_id"])["element"])
+        is_event = bool(scene_by_id(trigger["scene_id"], state["scenario"])["element"])
         return "finalize_split" if is_event and state["phase"] == "negotiate" else "run_scene"
     if state["phase"] == "negotiate" and trigger["channel"] == "dm":
         return "check_agreement"
@@ -224,6 +225,7 @@ async def run_turn(session_id: str, minute: float, trigger: dict) -> None:
     s = store.get_session(session_id)
     await GRAPH.ainvoke(
         {"session_id": session_id, "minute": minute, "trigger": trigger, "phase": s["phase"],
+         "scenario": s["scenario"],
          "negotiation_round": s["negotiation_round"], "assignment": s["assignment"],
          "requested": {}, "agreed": False, "about_split": False},
         {"configurable": {"thread_id": session_id},

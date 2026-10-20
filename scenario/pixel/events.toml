@@ -1,0 +1,80 @@
+# 픽셀게임즈 팩 장면. id·시점·발화자·관찰 요소는 모아런과 같다(엔진·관찰 코드 공통). 내용만 다르다.
+
+[[scene]]
+id = "kickoff"
+at_minute = 0
+speaker = "lead"
+channel = "team"
+element = ""
+message = "신규 유저가 설치 7일 뒤에도 계속 접속하게 만드는 이벤트·기능을 기획해 주세요. 2시간 뒤 2~3쪽 기획안을 공유 문서로 받겠습니다. 필요하면 AI 어시스턴트를 써도 됩니다."
+must_include = [["7일"], ["2시간"], ["기획안"], ["AI 어시스턴트", "어시스턴트"]]
+fallback = "신규 유저가 설치 7일 뒤에도 계속 접속하게 만드는 이벤트·기능을 기획해 주세요. 2시간 뒤 2~3쪽 기획안을 공유 문서로 받겠습니다. 필요하면 AI 어시스턴트를 써도 됩니다."
+
+[[scene]]
+id = "kickoff_greeting"
+at_minute = 0
+speaker = "coworker"
+channel = "team"
+element = ""
+message = "오늘 합류한 지원자에게 반갑게 인사한다. 입사 2년 차 게임 기획자 윤하늘로 자기소개한다."
+must_include = [["윤하늘"]]
+fallback = "안녕하세요, 오늘부터 같이 일하게 된 2년 차 게임 기획자 윤하늘입니다. 잘 부탁드려요!"
+
+[[scene]]
+id = "negotiate"
+at_minute = 10
+speaker = "coworker"
+channel = "dm"
+element = ""
+message = "기본 분담안을 제안한다: 1·2번은 지원자, 3번은 함께, 4·5번은 윤하늘. 다르게 나누고 싶으면 말해 달라고 한다."
+must_include = [["1번", "1·2번", "1, 2번"], ["3번"], ["4번", "4·5번", "4, 5번"]]
+fallback = "분담은 이렇게 해 보면 어떨까요? 1·2번(문제 정의, 설문 근거)은 맡아 주시고, 3번(이벤트·기능)은 같이, 4·5번(게임 사례, 지표·일정)은 제가 할게요. 다르게 나누고 싶으시면 말씀해 주세요."
+
+[[scene]]
+id = "coop_help"
+at_minute = 30
+speaker = "coworker"
+channel = "dm"
+element = "협력 태도"
+message = "비슷한 게임 사례를 찾는데 기준이 헷갈려요. 10분만 같이 봐줄 수 있을까요?"
+must_include = [["사례"], ["10분"]]
+fallback = "비슷한 게임 사례를 찾는데 기준이 헷갈려요. 10분만 같이 봐줄 수 있을까요?"
+
+[[scene]]
+id = "resp_delay"
+at_minute = 50
+speaker = "system"
+channel = "system"
+element = "책임감"
+message = "유저 설문 요약이 데이터팀 사정으로 15분 늦게 공유됩니다."
+
+[[scene]]
+id = "flex_change"
+at_minute = 70
+speaker = "lead"
+channel = "team"
+element = "유연성"
+message = "라이브 운영 회의에서 방향이 바뀌었어요. 신규 유저 말고 30일 넘게 접속하지 않은 복귀 유저로 가 주세요. 마감은 그대로예요."
+must_include = [["30일"], ["마감"]]
+fallback = "라이브 운영 회의에서 방향이 바뀌었어요. 신규 유저 말고 30일 넘게 접속하지 않은 복귀 유저로 가 주세요. 마감은 그대로예요."
+
+[[scene]]
+id = "respect_review"
+at_minute = 90
+speaker = "coworker"
+channel = "dm"
+element = "존중·소통"
+message = "자기 파트를 공유하며 리뷰를 부탁한다. 공유한 이벤트에 '7일 출석 시 확률형 전설 상자 지급'이 들어 있다. (운영 정책과 어긋난다는 사실은 말하지 않는다)"
+shares_coworker_parts = true
+must_include = [["리뷰", "봐주", "확인"]]
+fallback = "제 작업 내용을 공유 문서에 올렸어요. 한번 리뷰해 주실 수 있을까요?"
+
+[[scene]]
+id = "deadline_report"
+at_minute = 110
+speaker = "lead"
+channel = "team"
+element = ""
+message = "마감입니다. 기획안을 제출하고 진행 내용을 보고해 달라고 요청한다."
+must_include = [["제출"], ["보고", "공유"]]
+fallback = "마감 시간입니다. 기획안을 제출하고 진행한 내용을 보고해 주세요."

@@ -1,6 +1,6 @@
 """터미널 시뮬레이션: 가짜 시계로 2시간 세션을 몇 분 안에 돌린다.
 
-실행: uv run python -m app.cli [대본 경로]
+실행: uv run python -m app.cli [대본 경로] [시나리오 팩]
 - 실제 시간을 기다리지 않고 now 값을 STEP_SECONDS씩 올려 tick을 부른다.
 - 대본(eval/scripts/*.toml)의 지원자 행동을 정해진 분에 실행한다.
 """
@@ -17,15 +17,15 @@ STEP_SECONDS = 10   # 가짜 시계 한 칸(초). pause_after_idle_seconds보다
 def _print_new(session_id: str, after_id: int) -> int:
     for m in store.list_messages(session_id, after_id=after_id):
         print(f"[{clock.format_minute(m['minute'])}][{m['channel']:9}] "
-              f"{persona.NAMES[m['sender']]}: {m['content']}")
+              f"{settings.names(store.get_session(session_id)['scenario'])[m['sender']]}: {m['content']}")
         after_id = m["id"]
     return after_id
 
 
-async def main(script_path: Path) -> None:
+async def main(script_path: Path, scenario: str | None = None) -> None:
     actions = tomllib.loads(script_path.read_text(encoding="utf-8"))["action"]
     scale = settings.config()["session"]["time_scale"]
-    sid = store.create_session("데모지원자")
+    sid = store.create_session("데모지원자", scenario=scenario)
     print(f"세션 {sid} 시작 (대본: {script_path.name})")
     now, last_id, done = 1_000_000.0, 0, set()
     while True:
@@ -60,7 +60,7 @@ async def main(script_path: Path) -> None:
             print(f"  ({sec['note']})")
     s = store.get_session(sid)
     print("\n== 결과 ==")
-    print("상태:", s["status"], "/ 분업:", persona.assignment_text(s["assignment"]),
+    print("상태:", s["status"], "/ 분업:", persona.assignment_text(s["assignment"], s["scenario"]),
           "/ 조정 횟수:", s["negotiation_round"])
     print("실행된 장면:", sorted(store.run_scene_ids(sid)))
     print("태스크 보드:", [(t["part"], t["owner"]) for t in store.list_tasks(sid)])
@@ -70,4 +70,5 @@ async def main(script_path: Path) -> None:
 
 if __name__ == "__main__":
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else settings.ROOT / "eval" / "scripts" / "demo.toml"
-    asyncio.run(main(path))
+    pack = sys.argv[2] if len(sys.argv) > 2 else None   # 시나리오 팩 (예: pixel)
+    asyncio.run(main(path, pack))

@@ -34,6 +34,7 @@ class SpeakState(TypedDict, total=False):
     minute: float                 # 세션 시각. 문서 공개 시각 판단에 쓴다(코드가 넣음)
     company: str                  # 기업. 기업이 등록한 문서(F-06)까지 검색한다(코드가 넣음)
     plan_session: str             # 공유 문서 읽기를 허용할 세션 id(동료·팀장만, 없으면 "")
+    scenario: str                 # 시나리오 팩(기업 맞춤 시나리오). 문서 검색 범위를 정한다(코드가 넣음)
     use_tools: bool
     temperature: float
     messages: list[BaseMessage]   # 시스템·대화·도구 결과
@@ -108,7 +109,8 @@ async def tools_node(state: SpeakState) -> SpeakState:
     names = {tc["name"] for tc in state["messages"][-1].tool_calls}
     progress.set(state.get("session_id", ""), state.get("node", ""), "tools",
                  "공유 문서를 읽는 중" if names == {"read_shared_plan"} else "회사 문서를 찾는 중")
-    async with doc_tools(state["minute"], state["company"], state["plan_session"]) as tools:
+    async with doc_tools(state["minute"], state["company"], state["plan_session"],
+                         state.get("scenario", "")) as tools:
         by_name = {t.name: t for t in tools}
         for tc in state["messages"][-1].tool_calls:
             calls += 1
@@ -134,7 +136,8 @@ async def tools_node(state: SpeakState) -> SpeakState:
 
 def check(text: str, must_include: list[list[str]], read_titles: list[str], use_tools: bool,
           minute: float = float("inf"), company: str = "", tools_used: int = 1,
-          called_tools: list[str] | None = None, required_tool: str = "", unshared: bool = False) -> str:
+          called_tools: list[str] | None = None, required_tool: str = "", unshared: bool = False,
+          scenario: str = "") -> str:
     """AI 문장을 코드로 검증한다. 통과하면 "ok", 아니면 실패 이유.
 
     출처 검사는 지금 공개된 문서만 대상으로 한다. 공개 전 문서는 내용을 알 수 없으므로
@@ -154,7 +157,7 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
     if use_tools and tools_used == 0 and any(p in text for p in config()["verify"]["deferral_phrases"]):
         return "deferral"   # 확인하겠다고 말만 하고 이번 답에서 도구를 부르지 않음
     if use_tools:
-        for d in docs.available(company, minute):
+        for d in docs.available(company, minute, scenario or None):
             if d["title"] in text and d["title"] not in read_titles:
                 return f"citation:{d['title']}"
     return "ok"
@@ -164,7 +167,8 @@ def verify_node(state: SpeakState) -> SpeakState:
     progress.set(state.get("session_id", ""), state.get("node", ""), "verify", "답을 확인하는 중")
     verdict = check(state["text"], state["must_include"], state["read_titles"], state["use_tools"],
                     state["minute"], state["company"], state["tool_calls"],
-                    state["called_tools"], state["required_tool"], state.get("unshared", False))
+                    state["called_tools"], state["required_tool"], state.get("unshared", False),
+                    state.get("scenario", ""))
     llm.trace({"session": state["session_id"], "node": f"{state['node']}.verify",
                "verdict": verdict, "regenerations": state["regenerations"]})
     return {"verdict": verdict, "verdicts": state["verdicts"] + [verdict]}
@@ -238,7 +242,7 @@ SPEAK = build()
 async def speak(*, session_id: str, node: str, system: str, human: str, minute: float,
                 use_tools: bool, fallback: str, must_include: list[list[str]] | None = None,
                 company: str = "", plan_access: bool = False, required_tool: str = "",
-                unshared: bool = False) -> dict:
+                unshared: bool = False, scenario: str = "") -> dict:
     """발화 Graph를 실행하고 {text, verdicts, read_titles}를 반환한다.
 
     Raises:
@@ -253,6 +257,7 @@ async def speak(*, session_id: str, node: str, system: str, human: str, minute: 
         "session_id": session_id, "node": node, "minute": minute, "company": company,
         "plan_session": session_id if plan_access else "",
         "called_tools": [], "required_tool": required_tool if plan_access else "", "unshared": unshared,
+        "scenario": scenario,
         "use_tools": use_tools,
         "temperature": cfg["llm"]["persona_temperature"],
         "messages": [SystemMessage(system), HumanMessage(human)],

@@ -34,7 +34,7 @@ def vector_mode(monkeypatch):
 def test_index_records_model_and_dims_and_skips_unchanged():
     n = embedding.ensure_index("")
     assert n > 0
-    rows = store.chunk_index("", settings.config()["rag"]["embedding_model"])
+    rows = store.chunk_index(["pack:moarun"], settings.config()["rag"]["embedding_model"])
     assert {r["dims"] for r in rows} == {DIMS} and {r["model"] for r in rows} == {"text-embedding-3-small"}
     calls.clear()
     assert embedding.ensure_index("") == 0 and calls == []      # 내용이 같으면 다시 임베딩하지 않음

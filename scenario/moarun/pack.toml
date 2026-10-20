@@ -1,0 +1,20 @@
+# 모아런 팩: 팀 공통 PRD 6장 시나리오 그대로 (기본값)
+company = "루프랩"
+company_desc = "12명, 전원 리모트 근무 스타트업"
+service = "모아런"
+service_desc = "동네 러닝 모임을 찾아 함께 뛰는 앱"
+task_title = "모아런 신규 기능 기획"
+user_word = "사용자"           # 질문 속 '사용자'가 무엇을 뜻하는지(어시스턴트 안내용)
+lead_name = "한서윤"
+lead_short = "서윤"
+lead_role = "프로덕트 팀장"
+coworker_name = "이도현"
+coworker_short = "도현"
+coworker_role = "입사 2년 차 기획자"
+
+[part_titles]
+"1" = "문제 정의와 대상 사용자"
+"2" = "사용자 인터뷰에서 찾은 근거"
+"3" = "핵심 기능 제안"
+"4" = "비슷한 서비스 사례"
+"5" = "성공 지표와 출시 일정"
