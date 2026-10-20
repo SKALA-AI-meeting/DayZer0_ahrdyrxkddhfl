@@ -154,8 +154,11 @@ async def reply(state: TurnState) -> TurnState:
     """지원자 메시지에 답한다. 1:1이면 동료, 팀 채널이면 팀장. 회사 정보는 문서 검색 후 출처를 밝힌다."""
     channel = state["trigger"]["channel"]
     role = "coworker" if channel == "dm" else "lead"
-    text = await persona.speak(role, state["session_id"], state["minute"],
-                               "방금 지원자가 보낸 메시지에 답하라.", ALL_CHANNELS)
+    review = persona.is_review_request(state["trigger"]["text"])
+    task = ("방금 지원자가 기획안 검토를 부탁했다. 공유 문서를 읽고 구체적인 의견을 1~2개 줘라."
+            if review else "방금 지원자가 보낸 메시지에 답하라.")
+    text = await persona.speak(role, state["session_id"], state["minute"], task, ALL_CHANNELS,
+                               review=review)
     _post(state, channel, role, text)
     return {}
 

@@ -8,6 +8,7 @@ AI가 만든 문장을 그대로 내보내지 않고, 코드가 검증한 뒤 �
                                       └─ 실패 + 한도 초과 → fallback → END     (안전한 대체 문장)
 
 verify가 검사하는 것 (모두 코드, LLM 아님):
+- 검토 요청 무시: 기획안 검토를 부탁받았는데 공유 문서(read_shared_plan)를 읽지 않음
 - 말만 하고 실행 안 함: "확인해 볼게요"라고 하면서 이번 답에서 도구를 한 번도 부르지 않음
 - 판정 발언(F-24): 합격·평가 결과·연출 같은 금지 표현
 - 필수 내용(F-23): 장면 대사에 전달해야 할 사실(events.toml must_include)이 빠졌는지
@@ -39,6 +40,8 @@ class SpeakState(TypedDict, total=False):
     streak: int
     last_tool: str
     read_titles: list[str]        # 이번 발화에서 도구로 실제 읽은 문서 제목
+    called_tools: list[str]       # 이번 시도에서 실제로 호출한 도구 이름
+    required_tool: str            # 이번 답에서 반드시 호출해야 하는 도구(예: 검토 요청 → read_shared_plan)
     regenerations: int
     text: str
     verdict: str                  # ok | judgement | missing:<사실> | citation:<문서>
@@ -96,12 +99,14 @@ async def tools_node(state: SpeakState) -> SpeakState:
                 titles += [d["title"] for d in docs.all_docs(state["company"])
                            if d["title"] in text and "아직 공유되지" not in text]
             out.append(ToolMessage(text[:max_chars], tool_call_id=tc["id"]))
+    called = state["called_tools"] + [tc["name"] for tc in state["messages"][-1].tool_calls]
     return {"messages": state["messages"] + out, "tool_calls": calls, "streak": streak,
-            "last_tool": last, "read_titles": titles}
+            "last_tool": last, "read_titles": titles, "called_tools": called}
 
 
 def check(text: str, must_include: list[list[str]], read_titles: list[str], use_tools: bool,
-          minute: float = float("inf"), company: str = "", tools_used: int = 1) -> str:
+          minute: float = float("inf"), company: str = "", tools_used: int = 1,
+          called_tools: list[str] | None = None, required_tool: str = "") -> str:
     """AI 문장을 코드로 검증한다. 통과하면 "ok", 아니면 실패 이유.
 
     출처 검사는 지금 공개된 문서만 대상으로 한다. 공개 전 문서는 내용을 알 수 없으므로
@@ -112,6 +117,8 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
     for options in must_include:
         if not any(o in text for o in options):
             return f"missing:{options[0]}"
+    if use_tools and required_tool and required_tool not in (called_tools or []):
+        return "not_read"   # 검토를 부탁받았는데 공유 문서를 실제로 읽지 않음
     if use_tools and tools_used == 0 and any(p in text for p in config()["verify"]["deferral_phrases"]):
         return "deferral"   # 확인하겠다고 말만 하고 이번 답에서 도구를 부르지 않음
     if use_tools:
@@ -123,7 +130,8 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
 
 def verify_node(state: SpeakState) -> SpeakState:
     verdict = check(state["text"], state["must_include"], state["read_titles"], state["use_tools"],
-                    state["minute"], state["company"], state["tool_calls"])
+                    state["minute"], state["company"], state["tool_calls"],
+                    state["called_tools"], state["required_tool"])
     llm.trace({"session": state["session_id"], "node": f"{state['node']}.verify",
                "verdict": verdict, "regenerations": state["regenerations"]})
     return {"verdict": verdict, "verdicts": state["verdicts"] + [verdict]}
@@ -140,6 +148,8 @@ def after_verify(state: SpeakState) -> str:
 FEEDBACK = {
     "judgement": "방금 답에 평가·합격·연출에 관한 표현이 있었다. 그런 표현 없이 업무 이야기만 다시 써라.",
     "missing": "방금 답에 반드시 전달해야 할 내용 '{x}'이(가) 빠졌다. 빠짐없이 넣어 다시 써라.",
+    "not_read": "지원자가 기획안 검토를 부탁했는데 공유 문서를 읽지 않았다. read_shared_plan으로 읽은 뒤, "
+                "지원자 파트에 대한 구체적인 의견을 1~2개 주어라(회사 문서 근거가 있으면 함께). 대신 써 주지는 마라.",
     "deferral": "확인하겠다고만 하고 실제로 확인하지 않았다. 지금 도구를 호출해 확인한 뒤, 확인한 내용으로 바로 답하라.",
     "citation": "방금 답에서 '{x}' 문서를 근거로 들었지만 이번에 그 문서를 읽지 않았다. "
                 "도구로 확인하거나, 확인하지 않은 문서는 언급하지 말고 다시 써라.",
@@ -155,7 +165,7 @@ def feedback_node(state: SpeakState) -> SpeakState:
     kind, _, detail = state["verdict"].partition(":")
     note = HumanMessage(FEEDBACK[kind].format(x=detail))
     return {"messages": state["messages"] + [note], "regenerations": state["regenerations"] + 1,
-            "tool_calls": 0, "streak": 0, "last_tool": ""}
+            "tool_calls": 0, "streak": 0, "last_tool": "", "called_tools": []}
 
 
 def done_node(state: SpeakState) -> SpeakState:
@@ -188,7 +198,7 @@ SPEAK = build()
 
 async def speak(*, session_id: str, node: str, system: str, human: str, minute: float,
                 use_tools: bool, fallback: str, must_include: list[list[str]] | None = None,
-                company: str = "", plan_access: bool = False) -> dict:
+                company: str = "", plan_access: bool = False, required_tool: str = "") -> dict:
     """발화 Graph를 실행하고 {text, verdicts, read_titles}를 반환한다.
 
     Raises:
@@ -201,6 +211,7 @@ async def speak(*, session_id: str, node: str, system: str, human: str, minute: 
     state = await asyncio.wait_for(SPEAK.ainvoke({
         "session_id": session_id, "node": node, "minute": minute, "company": company,
         "plan_session": session_id if plan_access else "",
+        "called_tools": [], "required_tool": required_tool if plan_access else "",
         "use_tools": use_tools,
         "temperature": cfg["llm"]["persona_temperature"],
         "messages": [SystemMessage(system), HumanMessage(human)],

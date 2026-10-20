@@ -32,6 +32,11 @@ def docs_text(minute: float, company: str = "") -> str:
     return ", ".join(f"{d['title']}(doc_id={d['id']})" for d in docs.available(company, minute))
 
 
+def is_review_request(text: str) -> bool:
+    """지원자 메시지가 기획안 검토를 부탁하는지 (표현 목록은 config [verify].review_request_phrases)."""
+    return any(p in text for p in config()["verify"]["review_request_phrases"])
+
+
 def assignment_text(assignment: dict[str, str]) -> str:
     """분담안을 사람이 읽는 문장으로 바꾼다."""
     return ", ".join(f"{p}번 {PART_TITLES[p]}: {NAMES[o]}" for p, o in sorted(assignment.items()))
@@ -39,7 +44,8 @@ def assignment_text(assignment: dict[str, str]) -> str:
 
 async def speak(role: str, session_id: str, minute: float, task: str,
                 channels: tuple[str, ...], use_tools: bool = True,
-                must_include: list[list[str]] | None = None, fallback: str | None = None) -> str:
+                must_include: list[list[str]] | None = None, fallback: str | None = None,
+                review: bool = False) -> str:
     """페르소나(coworker | lead)의 다음 메시지를 발화 Graph로 만든다(생성 → 코드 검증 → 재시도/대체).
 
     Args:
@@ -62,5 +68,6 @@ async def speak(role: str, session_id: str, minute: float, task: str,
         session_id=session_id, node=f"persona.{role}", system=system, human=human, minute=minute,
         use_tools=use_tools, must_include=must_include, company=session["company"],
         plan_access=use_tools,   # 동료·팀장은 공유 문서를 읽을 수 있다(편집은 지원자만)
+        required_tool="read_shared_plan" if review else "",   # 검토 요청이면 실제로 읽었는지 검증
         fallback=fallback or config()["verify"]["fallback_reply"])
     return result["text"]

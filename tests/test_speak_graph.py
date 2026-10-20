@@ -32,6 +32,22 @@ def test_promise_without_tool_call_is_deferral():
     assert sg.check(text, [], [], False, tools_used=0) == "ok"     # 도구가 없는 장면 대사는 대상 아님
 
 
+def test_review_request_requires_reading_shared_plan():
+    # 검토 요청에는 공유 문서를 실제로 읽어야 한다(읽지 않고 "확인했습니다"만 하면 실패)
+    text = "3번 작성해 주신 부분 확인했습니다! 4·5번 작업할게요."
+    assert sg.check(text, [], [], True, tools_used=1, called_tools=["search_company_docs"],
+                    required_tool="read_shared_plan") == "not_read"
+    assert sg.check(text, [], [], True, tools_used=1, called_tools=["read_shared_plan"],
+                    required_tool="read_shared_plan") == "ok"
+
+
+def test_review_request_detection():
+    from app import persona
+    assert persona.is_review_request("3번 보완할 부분 있으면 수정해주시고")
+    assert persona.is_review_request("제가 쓴 1번 한번 봐주실 수 있을까요?")
+    assert not persona.is_review_request("사례는 어떤 기준으로 고를까요?")
+
+
 def test_every_scene_fallback_passes_its_own_check():
     # 대체 문장 자체가 검증을 통과해야 한다(F-23 정해진 내용 보장)
     for s in scenes():
