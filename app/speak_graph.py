@@ -21,7 +21,7 @@ from typing import TypedDict
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from app import docs, guard, llm
+from app import docs, guard, llm, progress
 from app.mcp_client import doc_tool_specs, doc_tools
 from app.settings import config
 
@@ -79,6 +79,8 @@ def tool_text(result) -> str:
 
 async def llm_node(state: SpeakState) -> SpeakState:
     """모델이 다음 답 또는 도구 호출을 제안한다. 도구 한도에 닿았으면 도구 없이 답하게 한다."""
+    progress.set(state.get("session_id", ""), state.get("node", ""), "llm",
+                 "답을 다시 쓰는 중" if state.get("regenerations") else "답장을 쓰는 중")
     model = llm.chat_model(state["temperature"])
     limits = config()["agent_loop"]
     can_use_tools = state["use_tools"] and state["tool_calls"] < limits["max_tool_calls_per_reply"]
@@ -100,6 +102,9 @@ async def tools_node(state: SpeakState) -> SpeakState:
     calls, streak, last = state["tool_calls"], state["streak"], state["last_tool"]
     titles = list(state["read_titles"])
     out: list[BaseMessage] = []
+    names = {tc["name"] for tc in state["messages"][-1].tool_calls}
+    progress.set(state.get("session_id", ""), state.get("node", ""), "tools",
+                 "공유 문서를 읽는 중" if names == {"read_shared_plan"} else "회사 문서를 찾는 중")
     async with doc_tools(state["minute"], state["company"], state["plan_session"]) as tools:
         by_name = {t.name: t for t in tools}
         for tc in state["messages"][-1].tool_calls:
@@ -149,6 +154,7 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
 
 
 def verify_node(state: SpeakState) -> SpeakState:
+    progress.set(state.get("session_id", ""), state.get("node", ""), "verify", "답을 확인하는 중")
     verdict = check(state["text"], state["must_include"], state["read_titles"], state["use_tools"],
                     state["minute"], state["company"], state["tool_calls"],
                     state["called_tools"], state["required_tool"])
@@ -189,11 +195,13 @@ def feedback_node(state: SpeakState) -> SpeakState:
 
 
 def done_node(state: SpeakState) -> SpeakState:
+    progress.clear(state.get("session_id", ""), state.get("node", ""))
     return {"text": state["text"].strip()}
 
 
 def fallback_node(state: SpeakState) -> SpeakState:
     """끝내 검증을 통과하지 못하면 사실을 지어내지 않는 대체 문장을 쓴다."""
+    progress.clear(state.get("session_id", ""), state.get("node", ""))
     text = guard.notice() if state["verdict"] == "judgement" else state["fallback"]
     return {"text": text}
 
@@ -228,7 +236,8 @@ async def speak(*, session_id: str, node: str, system: str, human: str, minute: 
     limits = cfg["agent_loop"]
     # 도구 순환·검증 순환을 모두 돌 수 있는 최대 단계 수(무한 반복 방지)
     recursion = (limits["max_tool_calls_per_reply"] * 2 + 3) * (cfg["verify"]["max_regenerations"] + 1) + 5
-    state = await asyncio.wait_for(SPEAK.ainvoke({
+    try:
+        state = await _invoke({
         "session_id": session_id, "node": node, "minute": minute, "company": company,
         "plan_session": session_id if plan_access else "",
         "called_tools": [], "required_tool": required_tool if plan_access else "",
@@ -237,5 +246,11 @@ async def speak(*, session_id: str, node: str, system: str, human: str, minute: 
         "messages": [SystemMessage(system), HumanMessage(human)],
         "must_include": must_include or [], "fallback": fallback, "tool_calls": 0, "streak": 0,
         "last_tool": "", "read_titles": [], "regenerations": 0, "text": "", "verdict": "",
-        "verdicts": []}, {"recursion_limit": recursion}), limits["task_timeout_seconds"])
+        "verdicts": []}, recursion, limits["task_timeout_seconds"])
+    finally:
+        progress.clear(session_id, node)
     return {"text": state["text"], "verdicts": state["verdicts"], "read_titles": state["read_titles"]}
+
+
+async def _invoke(initial: SpeakState, recursion: int, timeout: float) -> SpeakState:
+    return await asyncio.wait_for(SPEAK.ainvoke(initial, {"recursion_limit": recursion}), timeout)

@@ -68,3 +68,13 @@ def test_fallback_uses_notice_for_judgement():
     out = sg.fallback_node({"verdict": "judgement", "fallback": "대체"})
     assert "평가 방식은" in out["text"]
     assert sg.fallback_node({"verdict": "citation:지표 현황", "fallback": "대체"})["text"] == "대체"
+
+
+def test_progress_events_follow_nodes():
+    from app import progress
+    sg.verify_node({"session_id": "s1", "node": "persona.coworker", "text": "네", "must_include": [],
+                    "read_titles": [], "use_tools": False, "minute": 0, "company": "",
+                    "tool_calls": 0, "called_tools": [], "required_tool": "", "verdicts": [], "regenerations": 0})
+    assert progress.get("s1") == [{"actor": "coworker", "label": "답을 확인하는 중", "node": "verify"}]
+    sg.done_node({"session_id": "s1", "node": "persona.coworker", "text": "네"})
+    assert progress.get("s1") == []

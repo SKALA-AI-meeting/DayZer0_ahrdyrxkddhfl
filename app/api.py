@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from app import auth, clock, doc_graph, engine, report, settings, store
+from app import auth, clock, doc_graph, engine, progress, report, settings, store
 from app import docs as docs_module
 
 @asynccontextmanager
@@ -199,6 +199,7 @@ async def poll(token: str, after: int = 0) -> dict:
         "docs": [{"id": d["id"], "title": d["title"]}
                  for d in docs_module.available(s["company"], state["minute"])],
         "part_titles": settings.PART_TITLES,
+        "activity": progress.get(s["id"]),   # 진행 이벤트: AI가 지금 하는 일
         "poll_interval_seconds": settings.config()["session"]["poll_interval_seconds"],
         "time_scale": settings.config()["session"]["time_scale"],
     }
