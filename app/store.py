@@ -78,6 +78,27 @@ CREATE TABLE IF NOT EXISTS reports (
     body TEXT,                         -- JSON
     error TEXT
 );
+-- 기업이 등록한 회사 문서(F-06). 승인된 것만 들어간다. 같은 doc_id면 시나리오 문서를 교체한다.
+CREATE TABLE IF NOT EXISTS company_docs (
+    company TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    available_from_minute REAL NOT NULL DEFAULT 0,
+    approved_at REAL NOT NULL,
+    PRIMARY KEY (company, doc_id)
+);
+-- 문서 등록 요청(F-06): waiting(승인 대기) | registered | rejected
+CREATE TABLE IF NOT EXISTS doc_requests (
+    request_id TEXT PRIMARY KEY,
+    company TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,                -- 개인정보 마스킹을 거친 본문
+    masked_count INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
 -- 장면은 세션당 한 번만 실행. PRIMARY KEY가 중복 실행을 막는다(F-23).
 CREATE TABLE IF NOT EXISTS scene_runs (
     session_id TEXT NOT NULL,
@@ -327,4 +348,46 @@ def create_admin(email: str, company: str, salt: str, pw_hash: str) -> bool:
 def get_admin(email: str) -> dict | None:
     with connect() as conn:
         row = conn.execute("SELECT * FROM admins WHERE email = ?", (email,)).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_company_doc(company: str, doc_id: str, title: str, body: str) -> None:
+    """승인된 회사 문서를 저장한다(같은 doc_id면 교체)."""
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO company_docs (company, doc_id, title, body, approved_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(company, doc_id) DO UPDATE SET title = excluded.title, body = excluded.body,"
+            " approved_at = excluded.approved_at", (company, doc_id, title, body, time.time()))
+
+
+def company_docs(company: str) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM company_docs WHERE company = ? ORDER BY doc_id", (company,))
+        return [dict(r) for r in rows]
+
+
+def save_doc_request(request_id: str, company: str, doc_id: str, title: str, body: str,
+                     masked_count: int) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO doc_requests (request_id, company, doc_id, title, body, masked_count, status,"
+            " created_at) VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)",
+            (request_id, company, doc_id, title, body, masked_count, time.time()))
+
+
+def set_doc_request_status(request_id: str, status: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE doc_requests SET status = ? WHERE request_id = ?", (status, request_id))
+
+
+def doc_requests(company: str) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM doc_requests WHERE company = ? ORDER BY created_at DESC",
+                            (company,))
+        return [dict(r) for r in rows]
+
+
+def get_doc_request(request_id: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM doc_requests WHERE request_id = ?", (request_id,)).fetchone()
     return dict(row) if row else None

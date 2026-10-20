@@ -40,7 +40,11 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
       const p = await api<Poll>(`/invite/${token}/poll?after=${lastId.current}`);
       if (p.messages.length) {
         lastId.current = p.messages[p.messages.length - 1].id;
-        setMessages((prev) => [...prev, ...p.messages]);
+        // 요청이 겹쳐 같은 메시지를 두 번 받아도 id로 한 번만 보여준다
+        setMessages((prev) => {
+          const seen = new Set(prev.map((m) => m.id));
+          return [...prev, ...p.messages.filter((m) => !seen.has(m.id))];
+        });
       }
       if (!loadedParts.current) { setParts(p.my_parts); loadedParts.current = true; }  // 이어하기 시 복원
       setState(p);
@@ -79,13 +83,19 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
     setAsking(false);
   }
 
+  const pending = useRef<Record<string, string>>({});   // 아직 저장 안 된 입력
+
+  function savePart(part: string, content: string) {
+    delete pending.current[part];
+    return api(`/invite/${token}/parts/${part}`, { method: "PUT", body: JSON.stringify({ content }) })
+      .catch((e) => setError(e.message));
+  }
+
   function editPart(part: string, content: string) {
     setParts((p) => ({ ...p, [part]: content }));
+    pending.current[part] = content;
     clearTimeout(saveTimers.current[part]);
-    saveTimers.current[part] = setTimeout(() => {
-      api(`/invite/${token}/parts/${part}`, { method: "PUT", body: JSON.stringify({ content }) })
-        .catch((e) => setError(e.message));
-    }, SAVE_DELAY_MS);
+    saveTimers.current[part] = setTimeout(() => savePart(part, content), SAVE_DELAY_MS);
   }
 
   async function setTask(part: string, status: string) {
@@ -101,6 +111,9 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
 
   async function submit() {
     if (!confirm("기획안을 제출하고 세션을 끝낼까요?")) return;
+    // 자동 저장을 기다리지 않고, 남은 입력을 먼저 저장한 뒤 제출한다(마지막 수정 누락 방지)
+    Object.values(saveTimers.current).forEach(clearTimeout);
+    await Promise.all(Object.entries(pending.current).map(([part, content]) => savePart(part, content)));
     await api(`/invite/${token}/submit`, { method: "POST" });
     onEnd();
   }

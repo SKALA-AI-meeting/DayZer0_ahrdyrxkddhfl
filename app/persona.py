@@ -3,7 +3,7 @@
 - 대화 맥락은 최근 메시지를 history_token_budget 안에서 잘라 넣는다(Harness: Context).
 - 실제 문장 생성과 검증(판정 발언·필수 내용·출처)은 발화 Graph(app/speak_graph.py)가 한다.
 """
-from app import clock, speak_graph, store
+from app import clock, docs, speak_graph, store
 from app.settings import PART_TITLES, config, prompt
 
 NAMES = {"candidate": "지원자", "coworker": "이도현", "lead": "한서윤 팀장",
@@ -27,11 +27,9 @@ def transcript(session_id: str, channels: tuple[str, ...]) -> str:
     return "\n".join(head + list(reversed(kept))) or "(아직 대화 없음)"
 
 
-def docs_text(minute: float) -> str:
+def docs_text(minute: float, company: str = "") -> str:
     """지금 볼 수 있는 회사 문서 목록 (모델이 없는 문서를 다른 문서로 대신 답하지 않게 알려 준다)."""
-    from app.settings import docs_index
-    return ", ".join(f"{d['title']}(doc_id={d['id']})"
-                     for d in clock.available_docs(docs_index(), minute))
+    return ", ".join(f"{d['title']}(doc_id={d['id']})" for d in docs.available(company, minute))
 
 
 def assignment_text(assignment: dict[str, str]) -> str:
@@ -57,11 +55,11 @@ async def speak(role: str, session_id: str, minute: float, task: str,
     session = store.get_session(session_id)
     system = (f"{prompt(role)}\n\n## 현재 상황\n- 세션 시각: {clock.format_minute(minute)}\n"
               f"- 현재 분담: {assignment_text(session['assignment'])}\n"
-              f"- 지금 볼 수 있는 회사 문서: {docs_text(minute)} (이 목록에 없는 문서는 아직 볼 수 없다)")
+              f"- 지금 볼 수 있는 회사 문서: {docs_text(minute, session['company'])} (이 목록에 없는 문서는 아직 볼 수 없다)")
     human = (f"최근 대화:\n{transcript(session_id, channels)}\n\n지금 할 일: {task}\n"
              "메신저에 보낼 메시지 본문만 써라.")
     result = await speak_graph.speak(
         session_id=session_id, node=f"persona.{role}", system=system, human=human, minute=minute,
-        use_tools=use_tools, must_include=must_include,
+        use_tools=use_tools, must_include=must_include, company=session["company"],
         fallback=fallback or config()["verify"]["fallback_reply"])
     return result["text"]

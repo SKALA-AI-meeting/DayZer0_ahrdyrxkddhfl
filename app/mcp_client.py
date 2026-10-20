@@ -25,24 +25,24 @@ def _client() -> MultiServerMCPClient:
 
 
 @asynccontextmanager
-async def doc_tools(session_minute: float):
-    """rag-mcp에 연결해, 시각이 고정된 문서 도구 3개를 모델용으로 돌려준다."""
+async def doc_tools(session_minute: float, company: str = ""):
+    """rag-mcp에 연결해, 시각·기업이 고정된 문서 도구 3개를 모델용으로 돌려준다."""
     async with _client().session("rag") as session:
         raw = {t.name: t for t in await load_mcp_tools(session)}
 
         async def search_company_docs(query: str) -> str:
             """회사 문서(지표, 정책, 회의록, 소개, 인터뷰 등)에서 관련 문단을 찾는다. 결과의 title을 출처로 밝힌다."""
             return await raw["search_company_docs"].ainvoke(
-                {"query": query, "session_minute": session_minute})
+                {"query": query, "session_minute": session_minute, "company": company})
 
         async def read_company_doc(doc_id: str) -> str:
             """회사 문서 전문을 읽는다. doc_id는 list_company_docs 결과의 doc_id."""
             return await raw["read_company_doc"].ainvoke(
-                {"doc_id": doc_id, "session_minute": session_minute})
+                {"doc_id": doc_id, "session_minute": session_minute, "company": company})
 
         async def list_company_docs() -> str:
             """지금 읽을 수 있는 회사 문서 목록을 본다."""
-            return await raw["list_company_docs"].ainvoke({"session_minute": session_minute})
+            return await raw["list_company_docs"].ainvoke({"session_minute": session_minute, "company": company})
 
         yield [StructuredTool.from_function(coroutine=fn, name=fn.__name__,
                                             description=fn.__doc__)
@@ -67,6 +67,13 @@ def doc_tool_specs() -> list[StructuredTool]:
     return [StructuredTool.from_function(coroutine=_spec_only, name=name, description=desc,
                                          args_schema=create_model(f"{name}_args", **fields))
             for name, desc, fields in specs]
+
+
+async def call_rag(tool_name: str, args: dict) -> str:
+    """rag-mcp 도구를 코드에서 직접 호출한다 (예: 승인 후 register_company_doc)."""
+    async with _client().session("rag") as session:
+        tools = {t.name: t for t in await load_mcp_tools(session)}
+        return await tools[tool_name].ainvoke(args)
 
 
 async def call_business(tool_name: str, args: dict) -> str:

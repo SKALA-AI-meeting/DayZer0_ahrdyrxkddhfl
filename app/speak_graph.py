@@ -18,15 +18,16 @@ from typing import TypedDict
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from app import clock, guard, llm
+from app import docs, guard, llm
 from app.mcp_client import doc_tool_specs, doc_tools
-from app.settings import config, docs_index
+from app.settings import config
 
 
 class SpeakState(TypedDict, total=False):
     session_id: str
     node: str                     # 기록용 이름 (예: "persona.coworker")
     minute: float                 # 세션 시각. 문서 공개 시각 판단에 쓴다(코드가 넣음)
+    company: str                  # 기업. 기업이 등록한 문서(F-06)까지 검색한다(코드가 넣음)
     use_tools: bool
     temperature: float
     messages: list[BaseMessage]   # 시스템·대화·도구 결과
@@ -74,7 +75,7 @@ async def tools_node(state: SpeakState) -> SpeakState:
     calls, streak, last = state["tool_calls"], state["streak"], state["last_tool"]
     titles = list(state["read_titles"])
     out: list[BaseMessage] = []
-    async with doc_tools(state["minute"]) as tools:
+    async with doc_tools(state["minute"], state["company"]) as tools:
         by_name = {t.name: t for t in tools}
         for tc in state["messages"][-1].tool_calls:
             calls += 1
@@ -90,7 +91,7 @@ async def tools_node(state: SpeakState) -> SpeakState:
                 except Exception as exc:   # 도구 오류는 모델에게 알려 다른 방법을 찾게 한다
                     text = f"도구 오류: {exc}"
                 # 공개된 문서 내용이 실제로 돌아온 경우만 "읽은 문서"로 인정한다
-                titles += [d["title"] for d in docs_index()
+                titles += [d["title"] for d in docs.all_docs(state["company"])
                            if d["title"] in text and "아직 공유되지" not in text]
             out.append(ToolMessage(text[:max_chars], tool_call_id=tc["id"]))
     return {"messages": state["messages"] + out, "tool_calls": calls, "streak": streak,
@@ -98,7 +99,7 @@ async def tools_node(state: SpeakState) -> SpeakState:
 
 
 def check(text: str, must_include: list[list[str]], read_titles: list[str], use_tools: bool,
-          minute: float = float("inf")) -> str:
+          minute: float = float("inf"), company: str = "") -> str:
     """AI 문장을 코드로 검증한다. 통과하면 "ok", 아니면 실패 이유.
 
     출처 검사는 지금 공개된 문서만 대상으로 한다. 공개 전 문서는 내용을 알 수 없으므로
@@ -110,7 +111,7 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
         if not any(o in text for o in options):
             return f"missing:{options[0]}"
     if use_tools:
-        for d in clock.available_docs(docs_index(), minute):
+        for d in docs.available(company, minute):
             if d["title"] in text and d["title"] not in read_titles:
                 return f"citation:{d['title']}"
     return "ok"
@@ -118,7 +119,7 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
 
 def verify_node(state: SpeakState) -> SpeakState:
     verdict = check(state["text"], state["must_include"], state["read_titles"], state["use_tools"],
-                    state["minute"])
+                    state["minute"], state["company"])
     llm.trace({"session": state["session_id"], "node": f"{state['node']}.verify",
                "verdict": verdict, "regenerations": state["regenerations"]})
     return {"verdict": verdict, "verdicts": state["verdicts"] + [verdict]}
@@ -181,7 +182,8 @@ SPEAK = build()
 
 
 async def speak(*, session_id: str, node: str, system: str, human: str, minute: float,
-                use_tools: bool, fallback: str, must_include: list[list[str]] | None = None) -> dict:
+                use_tools: bool, fallback: str, must_include: list[list[str]] | None = None,
+                company: str = "") -> dict:
     """발화 Graph를 실행하고 {text, verdicts, read_titles}를 반환한다.
 
     Raises:
@@ -192,7 +194,8 @@ async def speak(*, session_id: str, node: str, system: str, human: str, minute: 
     # 도구 순환·검증 순환을 모두 돌 수 있는 최대 단계 수(무한 반복 방지)
     recursion = (limits["max_tool_calls_per_reply"] * 2 + 3) * (cfg["verify"]["max_regenerations"] + 1) + 5
     state = await asyncio.wait_for(SPEAK.ainvoke({
-        "session_id": session_id, "node": node, "minute": minute, "use_tools": use_tools,
+        "session_id": session_id, "node": node, "minute": minute, "company": company,
+        "use_tools": use_tools,
         "temperature": cfg["llm"]["persona_temperature"],
         "messages": [SystemMessage(system), HumanMessage(human)],
         "must_include": must_include or [], "fallback": fallback, "tool_calls": 0, "streak": 0,

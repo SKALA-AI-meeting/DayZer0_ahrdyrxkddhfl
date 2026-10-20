@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import DocAdmin from "@/components/DocAdmin";
 import { adminToken, api, ApiError, STATUS_LABEL } from "@/lib/api";
 
 type Candidate = { id: string; alias: string; email: string; status: string; invite_path: string };
@@ -87,6 +88,8 @@ export default function AdminHome() {
           </tbody>
         </table>
       </div>
+
+      <DocAdmin />
     </main>
   );
 }

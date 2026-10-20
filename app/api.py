@@ -9,7 +9,8 @@
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from app import auth, clock, engine, settings, store
+from app import auth, clock, doc_graph, engine, settings, store
+from app import docs as docs_module
 
 app = FastAPI(title="Day Zero MVP")
 
@@ -185,7 +186,7 @@ async def poll(token: str, after: int = 0) -> dict:
         "my_parts": {k: v for k, v in parts.items() if k in settings.PART_TITLES},
         "coworker_parts": {k.split(":")[1]: v for k, v in parts.items() if k.startswith("coworker:")},
         "docs": [{"id": d["id"], "title": d["title"]}
-                 for d in clock.available_docs(settings.docs_index(), state["minute"])],
+                 for d in docs_module.available(s["company"], state["minute"])],
         "part_titles": settings.PART_TITLES,
         "poll_interval_seconds": settings.config()["session"]["poll_interval_seconds"],
     }
@@ -242,12 +243,12 @@ def read_doc(token: str, doc_id: str) -> dict:
     """회사 문서 열람(F-15): 공개 시각 전 문서는 열 수 없다."""
     s = _candidate(token, need_active=False)
     minute = clock.minute_of(s["sim_seconds"])
-    doc = {d["id"]: d for d in settings.docs_index()}.get(doc_id)
+    doc = {d["id"]: d for d in docs_module.all_docs(s["company"])}.get(doc_id)
     if doc is None:
         raise HTTPException(404, "없는 문서입니다.")
     if doc["available_from_minute"] > minute:
         raise HTTPException(403, f"'{doc['title']}' 문서는 아직 공유되지 않았습니다.")
-    return {"id": doc_id, "title": doc["title"], "body": settings.doc_text(doc_id)}
+    return {"id": doc_id, "title": doc["title"], "body": docs_module.body(s["company"], doc_id)}
 
 
 @app.post("/api/invite/{token}/submit")
@@ -269,3 +270,40 @@ def debrief(token: str) -> dict:
     return {"events": events,
             "notice": "위 상황은 평가를 위해 연출된 것입니다. 리포트는 점수 없이 관찰 기록만 담아 "
                       "채용 담당자에게 전달되며, 최종 판단은 사람이 합니다."}
+
+
+# ---------- 회사 문서 관리 (F-06): 등록 요청 → 승인 대기(interrupt) → 승인 시 재개 ----------
+
+class DocIn(BaseModel):
+    doc_id: str
+    title: str
+    body: str
+
+
+class DecisionIn(BaseModel):
+    approved: bool
+
+
+@app.get("/api/admin/docs")
+def list_docs(admin: dict = Depends(_admin)) -> dict:
+    """현재 문서 목록(시나리오 + 승인된 기업 문서)과 등록 요청 목록."""
+    return {"docs": docs_module.all_docs(admin["company"]),
+            "requests": store.doc_requests(admin["company"])}
+
+
+@app.post("/api/admin/docs")
+async def request_doc(body: DocIn, admin: dict = Depends(_admin)) -> dict:
+    try:
+        return await doc_graph.request(admin["company"], body.doc_id.strip(), body.title, body.body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/admin/docs/{request_id}/decision")
+async def decide_doc(request_id: str, body: DecisionIn, admin: dict = Depends(_admin)) -> dict:
+    try:
+        return {"result": await doc_graph.decide(request_id, admin["company"], body.approved)}
+    except KeyError as exc:
+        raise HTTPException(404, "없는 요청입니다.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
