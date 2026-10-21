@@ -61,16 +61,12 @@ def test_docs_readable_and_completed_link(monkeypatch):
     assert all("지원자" not in e["message"] or "연락" in e["message"] for e in events)
 
 
-def test_work_step_records_memo_narration_and_moves_clock(monkeypatch):
-    from app import engine, work
-    async def fake_classify(sid, memo, pack=None):
-        return "own", "1"
+def test_work_step_records_choice_narration_and_moves_clock(monkeypatch):
+    from app import engine
 
     async def fake_business(tool, args):
         store.set_task_status(args["session_id"], args["part"], args["status"])
         return "ok"
-    from app import memo_agent
-    monkeypatch.setattr(memo_agent, "classify", fake_classify)
     monkeypatch.setattr(engine, "call_business", fake_business)
     a = _signup()
     token = client.post("/api/admin/invites", json={"alias": "x"}, headers=a).json()["invite_path"].rsplit("/", 1)[1]
@@ -78,12 +74,12 @@ def test_work_step_records_memo_narration_and_moves_clock(monkeypatch):
     for scene in ("kickoff", "kickoff_greeting", "negotiate"):
         store.claim_scene(sid, scene, 0)
     store.update_session(sid, status="in_progress", sim_seconds=3 * 60, phase="work")
-    assert client.post(f"/api/invite/{token}/work", json={"text": ""}).status_code == 400
-    assert client.post(f"/api/invite/{token}/work", json={"text": "가" * 101}).status_code == 400   # 100자 제한
-    r = client.post(f"/api/invite/{token}/work", json={"text": "1번 지표 분석부터 할게요"})
+    assert client.post(f"/api/invite/{token}/work", json={"part": ""}).status_code == 400
+    assert client.post(f"/api/invite/{token}/work", json={"part": "9"}).status_code == 400     # 없는 업무 번호
+    r = client.post(f"/api/invite/{token}/work", json={"part": "1"})
     assert r.status_code == 200 and 7.9 < r.json()["minute"] < 8.5                 # 3분 → 8분(skip_minutes=5)
     log = store.list_messages(sid, channels=("work",))
-    assert [m["sender"] for m in log] == ["candidate", "narrator"]
+    assert [(m["sender"], m["content"]) for m in log][0] == ("candidate", "1번 지표 분석 진행")   # 글이 아니라 고른 업무
     assert log[1]["content"] == "[내 업무 진행] 1번 지표 분석: 한 칸 진행했다 (1/2칸)."
     assert store.work_memos(sid) == {log[0]["id"]: {"category": "own", "part": "1", "advanced": True}}
     poll = client.get(f"/api/invite/{token}/poll").json()
@@ -167,3 +163,16 @@ def test_fixed_scenario_is_same_for_every_invite():
     assert {store.get_session(s)["scenario"] for s in sids} == {"moarun"}
     assert client.post("/api/auth/signup", json={"email": "z@z.kr", "password": "password123",
                                                   "company": "Z사", "scenario": "없는팩"}).status_code == 400
+
+
+# 버그(2026-10-21): 랜덤 배정 전에 만든 회사(시나리오 설정 없음)는 첫 지원자의 팩만 계속 나왔다
+def test_company_without_setting_gets_random_pack(monkeypatch):
+    import random
+    from app import auth, settings
+    store.create_session("예전 지원자", company="예전사", scenario="moarun")   # 설정 없이 세션만 있던 예전 계정
+    assert store.company_scenario("예전사") == settings.RANDOM_PACK
+    picks = iter(["workshop", "onsite"])
+    monkeypatch.setattr(random, "choice", lambda seq: next(picks))
+    sids = [auth.create_invite("예전사", f"x{i}", "")["session_id"] for i in range(2)]
+    assert [store.get_session(s)["scenario"] for s in sids] == ["workshop", "onsite"]
+    assert client.get("/api/scenarios").json()[0]["id"] == settings.RANDOM_PACK   # 가입 화면 기본값

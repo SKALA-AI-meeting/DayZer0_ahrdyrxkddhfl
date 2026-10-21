@@ -1,4 +1,4 @@
-"""엔진의 장면 규칙: 진행 상황을 물으면 일찍 털어놓기, 상담 뒤 대상 변경, 작업 계속하기의 시계 넘기기.
+"""엔진의 장면 규칙: 진행 상황을 물으면 일찍 털어놓기, 상담 뒤 대상 변경, 이 업무 하기의 시계 넘기기.
 LLM은 부르지 않는다(Graph 실행을 가짜로 바꿔 어떤 장면이 언제 실행되는지만 본다)."""
 import asyncio
 
@@ -85,19 +85,20 @@ def test_skip_target_stops_at_next_scene_and_session_end():
     assert engine.skip_target(sid, 37) == 40                     # 세션 끝을 넘지 않음
 
 
-def test_work_step_classify_failure_falls_back_to_other(monkeypatch, turns):
+def test_work_step_rejects_unknown_part_and_covers_coworker_part(monkeypatch, turns):
     from app import work
 
-    async def broken(*_a, **_k):
-        raise RuntimeError("LLM 장애")
-    from app import memo_agent
-    monkeypatch.setattr(memo_agent.llm, "ainvoke", broken)
+    async def fake_business(tool, args):
+        return "ok"
+    monkeypatch.setattr(engine, "call_business", fake_business)
     sid = _session(3)
     store.update_session(sid, status="in_progress", last_seen=1000.0)
-    asyncio.run(engine.work_step(sid, "음 일단 해볼게요", now=1000.0))
+    with pytest.raises(ValueError, match="업무 번호"):
+        asyncio.run(engine.work_step(sid, "", now=1000.0))
+    asyncio.run(engine.work_step(sid, "3", now=1000.0))                 # 3번은 동료가 맡은 업무(기본 분담안)
     [memo] = store.work_memos(sid).values()
-    assert memo == {"category": "other", "part": "", "advanced": False}
-    assert store.list_messages(sid, channels=("work",))[-1]["content"] == "[기타] 어떤 업무를 할지 분명하지 않아 업무 진척은 없었다."
+    assert memo == {"category": "cover", "part": "3", "advanced": True}
+    assert store.list_messages(sid, channels=("work",))[-1]["content"].startswith("[동료 업무 메우기] 3번")
 
 
 def _step(sid, part, minute, advanced=True, category="own"):
@@ -151,18 +152,13 @@ def test_work_step_advances_one_part_and_updates_card(monkeypatch, turns):
     from app import work
     calls = []
 
-    async def fake_classify(sid, memo, pack=None):
-        return "own", "2"                       # "2번하고 5번하고 다 했음"이어도 업무 하나만
-
     async def fake_business(tool, args):
         calls.append((tool, args["part"], args["status"]))
         return "ok"
-    from app import memo_agent
-    monkeypatch.setattr(memo_agent, "classify", fake_classify)
     monkeypatch.setattr(engine, "call_business", fake_business)
     sid = _session(3)
     store.update_session(sid, status="in_progress", last_seen=1000.0)
-    asyncio.run(engine.work_step(sid, "2번 하고 5번 하고 다 했음", now=1000.0))
+    asyncio.run(engine.work_step(sid, "2", now=1000.0))
     assert work.progress(sid)["2"] == 1 and work.progress(sid)["5"] == 0
     assert calls == [("update_task_status", "2", "doing")]
     assert store.list_messages(sid, channels=("work",))[-1]["content"].startswith("[내 업무 진행] 2번 사용자 인터뷰 정리: 한 칸")
@@ -179,3 +175,13 @@ def test_work_narration_follows_stage():
     store.claim_scene(sid, "pivot", 22)
     assert work.stage(sid) == "after_pivot"
     assert work.narration(sid, "unknown", "", False) == "어떤 업무를 할지 분명하지 않아 업무 진척은 없었다."
+
+
+# 버그(2026-10-21): 팀장이 마무리(00:38)한 뒤 "수고하셨습니다"에 팀장이 직전 1:1 답을 팀 채널에 그대로 다시 보냄
+def test_no_ai_reply_after_closing_scene(turns):
+    from app import settings
+    sid = _session(38.2, ran=tuple(s["id"] for s in settings.scenes()))
+    store.update_session(sid, status="in_progress", last_seen=1000.0)
+    asyncio.run(engine.send_message(sid, "team", "수고하셨습니다.", now=1000.0))
+    assert turns == []                                         # 에이전트를 부르지 않음
+    assert [m["content"] for m in store.list_messages(sid)] == ["수고하셨습니다."]   # 기록은 남음

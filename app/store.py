@@ -8,7 +8,7 @@ import sqlite3
 import time
 import uuid
 
-from app.settings import db_path, default_assignment, default_pack, part_titles
+from app.settings import RANDOM_PACK, db_path, default_assignment, default_pack, part_titles
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -380,13 +380,13 @@ def list_sessions(company: str) -> list[dict]:
 
 
 def company_scenario(company: str) -> str:
-    """기업의 시나리오 팩. 정한 적이 없으면 첫 지원자의 팩(이전 데이터), 그것도 없으면 기본 팩."""
+    """기업의 시나리오 설정(팩 id 또는 RANDOM_PACK). 정한 적이 없는 기업(랜덤 배정이 생기기 전 계정)은 지원자마다 랜덤.
+
+    예전에는 첫 지원자의 팩을 따랐는데, 그러면 예전 계정은 계속 한 팩만 나왔다(2026-10-21).
+    """
     with connect() as conn:
         row = conn.execute("SELECT scenario FROM company_settings WHERE company = ?", (company,)).fetchone()
-        if row is None:
-            row = conn.execute("SELECT scenario FROM sessions WHERE company = ? ORDER BY created_at LIMIT 1",
-                               (company,)).fetchone()
-    return row["scenario"] if row else default_pack()
+    return row["scenario"] if row else RANDOM_PACK
 
 
 def set_company_scenario(company: str, scenario: str) -> None:

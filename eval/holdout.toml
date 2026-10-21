@@ -9,7 +9,7 @@ messages = [
   { minute = 16, channel = "dm", text = "아 그랬군요. 그럼 남은 거 다 제가 할게요, 신경 쓰지 마세요." },
   { minute = 21, channel = "lead_dm", text = "네 괜찮아요, 제가 다 맡아서 하고 있어요." },
   { minute = 23, channel = "lead_dm", text = "혹시 오래라는 게 반년 이상인가요?" },
-  { minute = 24, channel = "work", text = "새 대상 기준으로 1번부터 다시" },
+  { minute = 24, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 33, channel = "lead_dm", text = "3번이랑 4번은 아직이에요. 제가 시간 배분을 못 했어요." },
 ]
 [case.expected."계획성·꼼꼼함"]
@@ -28,7 +28,6 @@ recovery_plan = true
 asked_criteria = true
 renegotiated = false
 shared_change = false
-replanned_in_memo = true
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = false
@@ -61,7 +60,6 @@ recovery_plan = false
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = false
@@ -74,15 +72,15 @@ scene_minutes = { coworker_miss = 12, pivot = 14.5 }
 skipped = ["lead_checkin"]
 messages = [
   { minute = 3, channel = "dm", text = "네, 그런데 일정은 어떻게 할까요? 각자 언제까지 끝낼지 정해요." },
-  { minute = 6, channel = "work", text = "1번 지표 정리" },
-  { minute = 11, channel = "work", text = "2번 인터뷰 정리, 끝나면 도현님께 공유" },
+  { minute = 6, channel = "work", text = "1번 지표 분석 진행" },
+  { minute = 11, channel = "work", text = "2번 사용자 인터뷰 정리 진행" },
   { minute = 11.9, channel = "dm", text = "도현님, 인터뷰 정리 공유드려요. 3번 진행은 어떠세요?" },
   { minute = 12.5, channel = "dm", text = "급하게 불려 가셨으면 어쩔 수 없죠. 3번은 제가 간단히 볼게요." },
   { minute = 13, channel = "lead_dm", text = "팀장님, 3·4번 쪽에 공백이 생겨서 3번은 제가 일부 맡고 4번은 축소하려고 합니다." },
   { minute = 14, channel = "lead_dm", text = "괜찮을까요?" },
   { minute = 15, channel = "lead_dm", text = "알겠습니다. 3개월 이상인지 6개월 이상인지 기준만 알려 주세요." },
   { minute = 16, channel = "dm", text = "도현님, 대상이 장기 미참여 사용자로 바뀌었어요." },
-  { minute = 17, channel = "work", text = "바뀐 대상에 맞춰 4번 축소" },
+  { minute = 17, channel = "work", text = "4번 개선 아이디어 정리 진행" },
   { minute = 33, channel = "lead_dm", text = "1·2번은 끝났고 3번은 절반, 4번은 축소했습니다. 도현님은 급한 업무에 차출되셨어요." },
 ]
 [case.expected."계획성·꼼꼼함"]
@@ -101,7 +99,6 @@ recovery_plan = true
 asked_criteria = true
 renegotiated = false
 shared_change = true
-replanned_in_memo = true
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = true
@@ -135,7 +132,6 @@ recovery_plan = false
 asked_criteria = false
 renegotiated = false
 shared_change = true
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = false
 fair_about_coworker = true

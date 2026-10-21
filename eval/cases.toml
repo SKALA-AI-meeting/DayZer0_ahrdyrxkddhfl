@@ -5,7 +5,7 @@
 # - skipped: 조건 때문에 실행되지 않은 장면(예: 지원자가 먼저 팀장에게 연락해 팀장 확인이 건너뛰어짐).
 # - channel: team | dm(동료 1:1) | lead_dm(팀장 1:1) | work(업무 메모). sender가 없으면 지원자.
 # - expected: 체크 id → true(그 행동이 있음) / false(없음). 체크 질문의 정의대로 사람이 정한 정답.
-#   규칙 관찰(contacted_lead_first, early_progress_check, memo_followed_through)은 LLM이 아니라 기록으로 확정되므로
+#   규칙 관찰(contacted_lead_first, early_progress_check, covered_coworker)은 LLM이 아니라 기록으로 확정되므로
 #   여기서 재지 않는다(tests/에서 검사).
 
 # ---------------------------------------------------------------- 1. 잘한 사례
@@ -16,15 +16,15 @@ skipped = ["lead_checkin"]
 messages = [
   { minute = 3, channel = "dm", text = "제안 감사해요! 그런데 4번 아이디어는 1·2번 분석이 나와야 정할 수 있을 것 같아서, 4번은 같이 하면 어떨까요? 10분쯤에 중간 점검도 한 번 해요." },
   { minute = 4, channel = "lead_dm", text = "팀장님, 보고는 슬라이드로 드리면 될까요, 아니면 메신저로 짧게 드리면 될까요?" },
-  { minute = 5, channel = "work", text = "1번 지표 분석부터 하고 2번 인터뷰 정리를 이어서 할게요" },
+  { minute = 5, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 9.9, channel = "dm", text = "도현님 중간 점검할 시간이에요. 3번 사례 조사는 진행 상황 어떠세요?" },
   { minute = 10.5, channel = "dm", text = "아이고, 급한 일이 겹치셨군요. 괜찮아요. 3번 사례 조사는 제가 간단히 맡고, 4번은 남은 시간에 같이 정리해요." },
-  { minute = 11, channel = "work", text = "팀장님께 3·4번 지연을 공유하고, 3번 사례는 2개만 빠르게 볼게요" },
+  { minute = 11, channel = "work", text = "4번 개선 아이디어 정리 진행" },
   { minute = 12, channel = "lead_dm", text = "팀장님, 도현님이 급한 업무에 차출되셔서 3·4번이 밀렸어요. 사례 조사는 제가 일부 맡고, 4번은 핵심 아이디어 2개까지만 정리하는 걸로 범위를 줄여도 될까요?" },
   { minute = 12.5, channel = "lead_dm", text = "네, 그럼 그렇게 진행하고 보고 때 범위를 같이 말씀드릴게요." },
   { minute = 14, channel = "lead_dm", text = "'오래'는 몇 개월 이상 안 나온 사용자 기준일까요? 데이터가 마감 뒤에 나오면 이번엔 기존 지표로 방향만 잡아 둘게요." },
   { minute = 15, channel = "dm", text = "도현님, 팀장님이 대상을 3개월 넘게 안 나온 사용자로 바꾸자고 하셨어요. 4번 아이디어도 그 기준으로 맞춰 봐요." },
-  { minute = 16, channel = "work", text = "바뀐 대상 기준으로 우선순위를 다시 정하고, 1번은 기존 지표로 방향만 잡을게요" },
+  { minute = 16, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 33, channel = "lead_dm", text = "아직 다 되진 않았어요. 1·2번은 기존 대상 기준으로 정리했고, 새 대상 데이터는 마감 뒤에 나와서 비워 뒀습니다. 3번은 도현님이 차출되셔서 제가 일부만 했고, 4번은 아이디어 2개까지 정리했어요." },
   { minute = 34, channel = "lead_dm", text = "도현님은 급한 업무로 빠지셨지만 4번 아이디어 방향은 같이 잡아 주셨어요." },
 ]
@@ -44,7 +44,6 @@ recovery_plan = true
 asked_criteria = true
 renegotiated = true
 shared_change = true
-replanned_in_memo = true
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = true
@@ -55,9 +54,9 @@ overclaimed = false
 name = "아쉬운 사례"
 messages = [
   { minute = 3, channel = "dm", text = "네 좋아요." },
-  { minute = 5, channel = "work", text = "제 거 할게요" },
+  { minute = 5, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 16, channel = "dm", text = "아 진짜요? 그럼 제가 다 해야 하잖아요. 미리 말씀을 해 주셨어야죠." },
-  { minute = 17, channel = "work", text = "내 업무 계속" },
+  { minute = 17, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 21, channel = "lead_dm", text = "네 괜찮습니다." },
   { minute = 23, channel = "lead_dm", text = "네 알겠습니다." },
   { minute = 33, channel = "lead_dm", text = "네, 거의 다 됐습니다." },
@@ -79,7 +78,6 @@ recovery_plan = false
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = false
@@ -99,7 +97,7 @@ messages = [
   { minute = 23, channel = "lead_dm", text = "그 대상은 최근 몇 달 기준으로 보면 될지 여쭤봐도 될까요?" },
   { minute = 24, channel = "lead_dm", text = "그럼 사례 조사는 이번엔 내려놓고 지표 쪽에 집중하겠습니다." },
   { minute = 25, channel = "dm", text = "도현님, 팀장님 말씀으로는 이제 한동안 안 오신 분들을 보기로 했어요." },
-  { minute = 26, channel = "work", text = "사례는 접고 지표 정리에 집중" },
+  { minute = 26, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 33, channel = "lead_dm", text = "솔직히 말씀드리면 사례 조사는 손을 못 댔고 지표만 정리됐습니다. 도현님은 다른 급한 건 때문에 빠지셨어요." },
 ]
 [case.expected."계획성·꼼꼼함"]
@@ -118,7 +116,6 @@ recovery_plan = true
 asked_criteria = true
 renegotiated = true
 shared_change = true
-replanned_in_memo = true
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = true
@@ -129,7 +126,7 @@ overclaimed = false
 name = "수동적인 사례"
 messages = [
   { minute = 3, channel = "dm", text = "네 좋아요!" },
-  { minute = 6, channel = "work", text = "맡은 거 하기" },
+  { minute = 6, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 16, channel = "dm", text = "아 네네" },
   { minute = 21, channel = "lead_dm", text = "네 잘 되고 있어요" },
   { minute = 23, channel = "lead_dm", text = "넵 알겠습니다! 열심히 하겠습니다" },
@@ -152,7 +149,6 @@ recovery_plan = false
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = false
@@ -163,12 +159,12 @@ overclaimed = false
 name = "메모로 계획하는 사례"
 messages = [
   { minute = 3, channel = "dm", text = "네, 그렇게 해요." },
-  { minute = 4, channel = "work", text = "1번이 끝나야 4번 아이디어가 나오니까 1번을 먼저 하고 2번 순서로 할게요" },
-  { minute = 9, channel = "work", text = "1·2번 마무리" },
+  { minute = 4, channel = "work", text = "1번 지표 분석 진행" },
+  { minute = 9, channel = "work", text = "2번 사용자 인터뷰 정리 진행" },
   { minute = 16, channel = "dm", text = "그러셨군요, 무슨 급한 일이었어요?" },
-  { minute = 17, channel = "work", text = "3번은 빼고 4번 아이디어를 내가 2개만 정리" },
+  { minute = 17, channel = "work", text = "3번 비슷한 서비스 사례 조사 진행" },
   { minute = 21, channel = "lead_dm", text = "도현님 쪽이 좀 밀려서 4번은 제가 일부 맡았어요." },
-  { minute = 23, channel = "work", text = "바뀐 대상 기준으로 4번 우선순위 다시 정리" },
+  { minute = 23, channel = "work", text = "4번 개선 아이디어 정리 진행" },
   { minute = 33, channel = "lead_dm", text = "1·2번은 끝났고, 4번은 2개까지, 3번은 못 했습니다." },
 ]
 [case.expected."계획성·꼼꼼함"]
@@ -187,7 +183,6 @@ recovery_plan = true
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = true
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = false
@@ -198,7 +193,7 @@ overclaimed = false
 name = "말과 행동이 다른 사례"
 messages = [
   { minute = 3, channel = "dm", text = "좋아요" },
-  { minute = 16, channel = "work", text = "팀장님께 지연 상황 보고하고 범위 조정 요청하기" },
+  { minute = 16, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 21, channel = "lead_dm", text = "네 문제없이 진행 중입니다!" },
   { minute = 23, channel = "lead_dm", text = "네 알겠습니다" },
   { minute = 33, channel = "lead_dm", text = "네, 다 됐어요. 정리해서 보내드릴게요." },
@@ -220,7 +215,6 @@ recovery_plan = true
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = false
 fair_about_coworker = false
@@ -253,7 +247,6 @@ recovery_plan = true
 asked_criteria = false
 renegotiated = true
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = false
@@ -288,7 +281,6 @@ recovery_plan = true
 asked_criteria = false
 renegotiated = true
 shared_change = true
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = true
@@ -323,7 +315,6 @@ recovery_plan = true
 asked_criteria = false
 renegotiated = false
 shared_change = true
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = true
@@ -356,7 +347,6 @@ recovery_plan = false
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = false
 fair_about_coworker = false
@@ -370,7 +360,7 @@ name = "일을 줄여 부탁하는 사례"
 messages = [
   { minute = 1.5, channel = "dm", text = "보고 자료 작성만 도와주시겠어요? 초안 넘겨주시면 제가 다듬고 보고하겠습니다" },
   { minute = 2.5, channel = "dm", text = "예 잘 부탁드립니다" },
-  { minute = 2.6, channel = "work", text = "지표 분석" },
+  { minute = 2.6, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 21.3, channel = "lead_dm", text = "조금 전에 도현님이 급하게 다른 업무에 차출되었다는 연락을 받았습니다. 제가 이어 받아 하겠습니다. 최대한 마감까지 해보겠습니다." },
   { minute = 21.9, channel = "dm", text = "아... 그럼 어디까지 하셨어요? 지금까지 한 부분만 공유해주세요" },
   { minute = 22.9, channel = "dm", text = "우선 하신 부분 최대한 공유해주시고... 보고 자료는 작성하실 수 있나요?" },
@@ -394,7 +384,6 @@ recovery_plan = true
 asked_criteria = true
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = true
 fair_about_coworker = false
@@ -405,7 +394,7 @@ overclaimed = false
 name = "시간을 나눠 계획하는 사례"
 messages = [
   { minute = 3, channel = "dm", text = "좋아요. 저는 1번을 8분까지, 2번을 14분까지 끝내 볼게요. 도현님은 3번 언제쯤 끝나실 것 같아요?" },
-  { minute = 4, channel = "work", text = "남은 시간 중 10분은 1번, 그다음 6분은 2번에 쓰기" },
+  { minute = 4, channel = "work", text = "1번 지표 분석 진행" },
   { minute = 5, channel = "lead_dm", text = "팀장님, 보고 자료는 몇 장 정도면 될까요?" },
 ]
 [case.expected."계획성·꼼꼼함"]
@@ -424,7 +413,6 @@ recovery_plan = false
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = false
 fair_about_coworker = false
@@ -435,7 +423,7 @@ overclaimed = false
 name = "의존 관계만 짚는 사례"
 messages = [
   { minute = 3, channel = "dm", text = "4번 아이디어는 1번 지표 분석 결과를 바탕으로 해야 하니까, 1번이 나온 다음에 정하는 게 맞을 것 같아요." },
-  { minute = 4, channel = "work", text = "1번 분석이 끝나야 4번이 가능하니 1번부터" },
+  { minute = 4, channel = "work", text = "1번 지표 분석 진행" },
 ]
 [case.expected."계획성·꼼꼼함"]
 clarified_scope = false
@@ -453,7 +441,6 @@ recovery_plan = false
 asked_criteria = false
 renegotiated = false
 shared_change = false
-replanned_in_memo = false
 [case.expected."정직·공정한 보고"]
 disclosed_incomplete = false
 fair_about_coworker = false

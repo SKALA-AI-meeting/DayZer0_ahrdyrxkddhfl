@@ -359,6 +359,8 @@ def test_negated_quote_is_kept_for_human_review(monkeypatch):
     async def fake(model, messages, node, sid_=""):   # 물어본 체크마다 답한다. overclaimed는 계속 같은 오판
         if node == "observe.nli":
             return observe.Relation(relation="contradicts")
+        if node == "observe.claims":   # 보고-진척 대조용 추출: 끝났다고 말한 업무 없음
+            return observe.DoneClaims(claims=[])
         ids = [line[2:].split(":")[0] for line in messages[1].content.splitlines() if line.startswith("- ")]
         return observe.Judgement(answers=[yes if i == "overclaimed" else CheckAnswer(check_id=i, answer="no")
                                           for i in ids])
@@ -379,6 +381,8 @@ def test_negated_quote_rechecked_by_entailment(monkeypatch):
     async def fake(model, messages, node, sid_=""):
         if node == "observe.nli":
             return observe.Relation(relation="supports")
+        if node == "observe.claims":   # 보고-진척 대조용 추출: 끝났다고 말한 업무 없음
+            return observe.DoneClaims(claims=[])
         ids = [line[2:].split(":")[0] for line in messages[1].content.splitlines() if line.startswith("- ")]
         return observe.Judgement(answers=[
             CheckAnswer(check_id=i, answer="yes", evidence_id=f"m{mid}", quote="다 됐어요. 아직 손볼 것도 없습니다")
@@ -390,21 +394,20 @@ def test_negated_quote_rechecked_by_entailment(monkeypatch):
     assert kept["verified"] and not r["negated"]
 
 
-# 규칙 관찰: 업무 메모에 적은 소통 계획을 실제로 실행했는가 (LLM이 오판하던 것을 기록으로 확정)
-def test_rule_memo_followed_through():
+# 규칙 관찰: 동료 업무가 밀린 뒤 동료가 맡은 업무를 직접 진행했는가(업무 선택 기록으로 확정)
+def test_rule_covered_coworker():
     sid = store.create_session("x")
-    store.add_message(sid, "lead_dm", "candidate", "팀장님 안녕하세요", 5)                 # 메모보다 먼저 보낸 건 아님
-    store.add_message(sid, "work", "candidate", "팀장님께 지연 상황 보고하고 범위 조정 요청하기", 16)
-    assert observe.rule_memo_followed_through(sid, {}, None) == []                        # 아직 안 보냄
-    store.add_message(sid, "team", "candidate", "도현님 괜찮으세요?", 17)                  # 동료를 부른 팀 채널 글은 아님
-    assert observe.rule_memo_followed_through(sid, {}, None) == []
-    mid = store.add_message(sid, "lead_dm", "candidate", "팀장님, 3·4번이 밀렸어요", 18)
-    [c] = observe.rule_memo_followed_through(sid, {}, None)
-    assert c["evidence_id"] == f"m{mid}" and "팀장에게" in c["behavior"]
-    other = store.create_session("y")
-    store.add_message(other, "work", "candidate", "1번 지표 분석부터", 6)                  # 소통 계획이 없는 메모
-    store.add_message(other, "lead_dm", "candidate", "팀장님 질문 있어요", 7)
-    assert observe.rule_memo_followed_through(other, {}, None) == []
+    mid = store.add_message(sid, "work", "candidate", "3번 비슷한 서비스 사례 조사 진행", 10)   # 동료 미이행 전
+    store.add_work_memo(sid, mid, "cover", "3", True)
+    assert observe.rule_covered_coworker(sid, {"coworker_miss": 15}, None) == []
+    mid = store.add_message(sid, "work", "candidate", "1번 지표 분석 진행", 16)                 # 내 업무
+    store.add_work_memo(sid, mid, "own", "1", True)
+    assert observe.rule_covered_coworker(sid, {"coworker_miss": 15}, None) == []
+    mid = store.add_message(sid, "work", "candidate", "4번 개선 아이디어 정리 진행", 18)
+    store.add_work_memo(sid, mid, "cover", "4", True)
+    [c] = observe.rule_covered_coworker(sid, {"coworker_miss": 15}, None)
+    assert c["evidence_id"] == f"m{mid}" and "4번" in c["behavior"]
+    assert observe.rule_covered_coworker(sid, {}, None) == []                                 # 상황이 없으면 기록 없음
 
 
 # 참고 등급 A~E: LLM이 아니라 코드가 검증된 근거 비율로 계산한다(config [grade])
@@ -511,3 +514,24 @@ def test_missing_required_word_is_rechecked_by_entailment(monkeypatch):
     assert got["disclosed_incomplete"]["verified"]                               # 표현이 달라도 살아남
     assert got["asked_criteria"]["answer"] == "no" and got["asked_criteria"]["nli"] == "unrelated"   # 하소연은 계속 뺌
     assert r["negated"] == []                                                    # 필수어 때문에 뺀 것은 '판단 필요'에 안 남김
+
+
+# 버그(2026-10-21): 0/2칸인 3번을 "대략 완료"라고 보고했는데 '다 된 것처럼 보고함'으로 잡히지 않음(섞인 보고)
+def test_report_claim_is_checked_against_real_progress(monkeypatch):
+    import asyncio
+    from app import observe, settings, store
+    sid = store.create_session("x")
+    for part, minute in [("1", 5), ("2", 10), ("2", 12), ("4", 20), ("4", 25)]:   # 진척: 1=1/2, 2=2/2, 3=0/2, 4=2/2
+        mid = store.add_message(sid, "work", "candidate", f"{part}번 진행", minute)
+        store.add_work_memo(sid, mid, "own", part, True)
+    report = "인터뷰 정리, 사례 조사, 아이디어 정리는 대략 완료했으나 지표 분석이 데이터 부족으로 확실하지 않습니다."
+    mid = store.add_message(sid, "lead_dm", "candidate", report, 37.9)
+
+    async def fake_extract(session_id, messages, pack, use_cache):   # LLM 추출 결과: 2·3·4번을 끝났다고 말함
+        return [observe.DoneClaim(message_id=f"m{mid}", parts=["2", "3", "4"], quote="인터뷰 정리, 사례 조사, 아이디어 정리는 대략 완료")]
+    monkeypatch.setattr(observe, "_extract_done_claims", fake_extract)
+    spec = next(e for e in settings.observation_spec()["element"] if e["name"] == "정직·공정한 보고")
+    found = asyncio.run(observe.progress_overclaims(sid, spec, 32, 40))
+    assert [f["check_id"] for f in found] == ["overclaimed"]          # 3번만(2·4번은 실제로 끝남)
+    assert found[0]["behavior"].startswith("3번") and "0/2칸" in found[0]["behavior"]
+    assert found[0]["evidence_id"] == f"m{mid}" and found[0]["verified"]

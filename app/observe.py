@@ -8,6 +8,8 @@
    체크가 정한 채널(예: 팀장에게 알렸는가 → 팀장 1:1·팀 채널)에서 온 근거여야 한다.
    아니면 yes를 버린다 → 근거 없는 판단이 리포트에 들어가지 않는다.
 5. 규칙 관찰(RULES): LLM 없이 기록만으로 확정한다(예: 팀장이 묻기 전에 먼저 연락했는가).
+5-1. 보고와 진척 대조: 보고에서 "끝났다"고 말한 업무를 LLM이 뽑기만 하고(사실 추출), 그 시각의 실제 진척(칸)과
+   코드가 대조해 끝나지 않은 업무면 '다 된 것처럼 보고함'(overclaimed)의 근거로 넣는다.
 6. 캐시: 같은 입력이면 같은 결과를 돌려준다(재현성).
 
 mode="rules"(A)는 LLM 없이 키워드 후보만으로 "관련 행동 있음"을 판단한다. A/B 비교 평가용.
@@ -20,7 +22,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from app import clock, llm, persona, store
+from app import clock, llm, persona, store, work
 from app.settings import config, names, observation_spec, pack_info, prompt, scenes
 
 
@@ -51,6 +53,16 @@ class Judgement(BaseModel):
 
 class Relation(BaseModel):
     relation: Literal["supports", "contradicts", "unrelated"]
+
+
+class DoneClaim(BaseModel):
+    message_id: str = Field(description="메시지 id(예: 'm12')")
+    parts: list[str] = Field(default_factory=list, description="끝났다고 말한 업무 번호들('1'~'5')")
+    quote: str = Field(default="", description="그 주장이 담긴 원문 구절 그대로")
+
+
+class DoneClaims(BaseModel):
+    claims: list[DoneClaim]
 
 
 # ---------- 입력 만들기 ----------
@@ -328,8 +340,70 @@ async def observe_element(session_id: str, spec: dict, run_minutes: dict[str, fl
         checks = [redo.get(c["check_id"], c) if c["check_id"] in dropped else c for c in checks]
         negated += [{"evidence_id": c["evidence_id"], "quote": c["quote"]} for c in redo.values()
                     if c.get("dropped_reason") == NEGATED_REASON]
-    return {**base, "happened": True, "checks": _with_points(checks, spec["checks"]) + rule_checks,
+    claims = await progress_overclaims(session_id, spec, start, end, use_cache)
+    return {**base, "happened": True, "checks": _with_points(checks, spec["checks"]) + rule_checks + claims,
             "negated": negated}
+
+
+# ---------- 보고와 진척 대조 (LLM은 주장 추출만, 판단은 코드) ----------
+
+OVERCLAIM_CHECK = "overclaimed"
+CLAIMS_VERSION = "v1"   # 추출 지시문·형식을 바꾸면 올린다(캐시 무효화)
+
+
+async def _extract_done_claims(session_id: str, messages: list[dict], pack: str | None,
+                               use_cache: bool) -> list[DoneClaim]:
+    """보고 메시지에서 '끝났다고 말한 업무 번호'만 뽑는다(사실 추출, temperature 0, 캐시)."""
+    titles = "\n".join(f"- {p}: {t}" for p, t in pack_info(pack)["part_titles"].items())
+    lines = "\n".join(f"[id=m{m['id']}] {m['content']}" for m in messages)
+    human = f"업무 목록:\n{titles}\n\n지원자가 팀장에게 보낸 메시지:\n{lines}"
+    key = hashlib.sha256(json.dumps([CLAIMS_VERSION, config()["llm"]["model"], prompt("claims", pack), human],
+                                    ensure_ascii=False).encode()).hexdigest()
+    if use_cache and (cached := store.cache_get(key)) is not None:
+        return [DoneClaim(**c) for c in cached["claims"]]
+    model = llm.chat_model(config()["llm"]["judge_temperature"]).with_structured_output(
+        DoneClaims, method="function_calling")
+    out: DoneClaims = await llm.ainvoke(model, [SystemMessage(prompt("claims", pack)), HumanMessage(human)],
+                                        "observe.claims", session_id)
+    store.cache_put(key, {"claims": [c.model_dump() for c in out.claims]})
+    return out.claims
+
+
+async def progress_overclaims(session_id: str, spec: dict, start: float, end: float,
+                              use_cache: bool = True) -> list[dict]:
+    """보고 요청 뒤 팀장에게 '끝났다'고 말한 업무가 그 시각에 실제로 끝나지 않았으면 overclaimed 근거로 돌려준다.
+
+    LLM이 문장 전체로 판단하면 "3번은 완료, 1번은 아직"처럼 섞인 보고에서 거짓 부분을 놓친다(2026-10-21 사례:
+    0/2칸인 사례 조사를 "대략 완료"라고 보고). 그래서 주장만 뽑고, 끝났는지는 기록(업무 진척 칸)으로 정한다.
+    """
+    if OVERCLAIM_CHECK not in {c["id"] for c in spec["checks"]}:
+        return []
+    pack = store.get_session(session_id)["scenario"]
+    msgs = [m for m in _window_messages(session_id, start, end)
+            if m["sender"] == "candidate" and (m["channel"] == "lead_dm"
+                                               or (m["channel"] == "team" and persona.team_responder(m["content"], pack) == "lead"))]
+    if not msgs:
+        return []
+    by_id = {f"m{m['id']}": m for m in msgs}
+    need = work.units(pack)
+    point = next(c.get("point", "") for c in spec["checks"] if c["id"] == OVERCLAIM_CHECK)
+    found, seen = [], set()
+    for claim in await _extract_done_claims(session_id, msgs, pack, use_cache):
+        m = by_id.get(claim.message_id)
+        if m is None:
+            continue
+        quote = claim.quote if claim.quote and quote_found(claim.quote, m["content"], config()["observation"]["quote_match_threshold"]) else m["content"]
+        done = work.progress(session_id, pack, until=m["minute"])
+        for part in claim.parts:
+            part = part.strip().rstrip("번")
+            if part not in need or done[part] >= need[part] or (m["id"], part) in seen:
+                continue
+            seen.add((m["id"], part))
+            found.append({"check_id": OVERCLAIM_CHECK, "answer": "yes", "verified": True,
+                          "evidence_id": f"m{m['id']}", "quote": quote, "point": point,
+                          "behavior": f"{work.part_name(part, pack)}: 끝나지 않았는데 끝났다고 보고함 "
+                                      f"(그 시각 실제 진척 {done[part]}/{need[part]}칸)"})
+    return found
 
 
 # ---------- 규칙 관찰 (LLM 없음, 기록으로 확정) ----------
@@ -401,37 +475,26 @@ def rule_initiated_split(session_id: str, run_minutes: dict[str, float], pack: s
              "quote": m["content"], "behavior": "동료가 분담안을 내기 전에 먼저 업무 분담을 꺼냄"}]
 
 
-def rule_memo_followed_through(session_id: str, run_minutes: dict[str, float], pack: str | None) -> list[dict]:
-    """업무 메모에 적은 소통 계획(예: '팀장님께 지연 보고')을 그 뒤 실제 메시지로 실행했는가.
+def rule_covered_coworker(session_id: str, run_minutes: dict[str, float], pack: str | None) -> list[dict]:
+    """동료 업무가 밀린 뒤(coworker_miss) 지원자가 동료가 맡은 업무를 직접 골라 한 칸 이상 진행했는가.
 
-    메모에 소통 표현(config [work].memo_contact_words)과 상대(팀장·동료 이름)가 있으면, 메모 뒤 그 상대에게 보낸
-    첫 메시지를 찾는다. 있으면 yes(근거는 그 메시지). 실행하지 않은 경우는 근거가 없으므로 기록하지 않는다.
+    업무는 번호로만 고르므로 선택 기록(work_memos의 범주 cover)만으로 확정한다. 근거는 그 선택 기록.
     """
-    info = pack_info(pack)
-    words = config()["work"]["memo_contact_words"]
-    targets = {"lead": ("팀장", info["lead_name"], info["lead_short"]),
-               "coworker": (info["coworker_name"], info["coworker_short"], "동료")}
-    channels = {"lead": ("lead_dm", "team"), "coworker": ("dm", "team")}
-    msgs = store.list_messages(session_id, channels=("work", *CHAT_CHANNELS))
-    for memo in [m for m in msgs if m["channel"] == MEMO_CHANNEL and m["sender"] == "candidate"]:
-        if not any(w in memo["content"] for w in words):
-            continue
-        for role, names_ in targets.items():
-            if not any(n in memo["content"] for n in names_):
-                continue
-            sent = next((m for m in msgs if m["sender"] == "candidate" and m["minute"] >= memo["minute"]
-                         and m["id"] > memo["id"] and m["channel"] in channels[role]
-                         and (m["channel"] != "team" or persona.team_responder(m["content"], pack) == role)), None)
-            if sent:
-                who = "팀장" if role == "lead" else "동료"
-                return [{"check_id": "memo_followed_through", "answer": "yes", "verified": True,
-                         "evidence_id": f"m{sent['id']}", "quote": sent["content"],
-                         "behavior": f"업무 메모('{memo['content']}')에 적은 대로 {who}에게 메시지를 보냄"}]
+    if "coworker_miss" not in run_minutes:
+        return []
+    since = run_minutes["coworker_miss"]
+    memos = store.work_memos(session_id)
+    for m in store.list_messages(session_id, channels=(MEMO_CHANNEL,)):
+        rec = memos.get(m["id"])
+        if m["sender"] == "candidate" and m["minute"] >= since and rec and rec["category"] == "cover" and rec["advanced"]:
+            return [{"check_id": "covered_coworker", "answer": "yes", "verified": True,
+                     "evidence_id": f"m{m['id']}", "quote": m["content"],
+                     "behavior": f"동료 업무가 밀린 뒤 동료가 맡은 업무를 직접 진행함({m['content']})"}]
     return []
 
 
 RULES = {"contacted_lead_first": rule_contacted_lead_first, "early_progress_check": rule_early_progress_check,
-         "memo_followed_through": rule_memo_followed_through, "initiated_split": rule_initiated_split}
+         "covered_coworker": rule_covered_coworker, "initiated_split": rule_initiated_split}
 
 
 def run_rules(session_id: str, spec: dict, run_minutes: dict[str, float]) -> list[dict]:

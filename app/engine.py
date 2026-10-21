@@ -98,6 +98,8 @@ async def send_message(session_id: str, channel: str, text: str, now: float | No
     minute = state["minute"]
     pack = store.get_session(session_id)["scenario"]
     store.add_message(session_id, channel, "candidate", text, minute)
+    if settings.config()["session"]["closing_scene"] in store.run_scene_ids(session_id):
+        return   # 팀장이 마무리한 뒤에는 기록만 한다(대화는 끝났다)
     role = persona.responder(channel, text, pack)
     if guard.is_evaluation_question(text):
         store.add_message(session_id, channel, role, guard.notice(), minute)
@@ -186,33 +188,32 @@ async def run_after_consult(session_id: str, minute: float) -> None:
 
 
 def skip_target(session_id: str, minute: float, pack: str | None = None) -> float:
-    """'작업 계속하기'로 넘어갈 세션 시각(분). skip_minutes만큼 넘기되 다음 장면 시각과 세션 끝을 넘지 않는다."""
+    """'이 업무 하기'로 넘어갈 세션 시각(분). skip_minutes만큼 넘기되 다음 장면 시각과 세션 끝을 넘지 않는다."""
     cfg = settings.config()
     ran = store.run_scene_ids(session_id)
     upcoming = [sc["at_minute"] for sc in settings.scenes(pack) if sc["id"] not in ran and sc["at_minute"] > minute]
     return min([minute + cfg["work"]["skip_minutes"], cfg["session"]["duration_minutes"]] + upcoming[:1])
 
 
-async def work_step(session_id: str, memo: str, now: float | None = None) -> dict:
-    """업무 메모를 받아 분류하고, 고정 지문을 남긴 뒤 시계를 넘긴다.
+async def work_step(session_id: str, part: str, now: float | None = None) -> dict:
+    """지원자가 고른 업무(1~5번) 하나를 한 칸 진행하고, 고정 지문을 남긴 뒤 시계를 넘긴다.
+
+    업무를 글로 쓰게 하면 글솜씨·구체성(능력)이 섞이므로 번호만 고르게 한다. LLM은 쓰지 않는다.
+    내가 맡은 업무면 '내 업무', 동료가 맡은 업무면 '동료 업무 메우기'로 코드가 정한다(work.resolve).
 
     Raises:
-        ValueError: 메모가 비었거나 너무 긺.
+        ValueError: 없는 업무 번호.
         RuntimeError: 이미 끝난 세션.
     """
     now = time.time() if now is None else now
-    memo = memo.strip()
-    limit = settings.config()["work"]["memo_max_chars"]
-    if not memo:
-        raise ValueError("다음에 무엇을 할지 짧게 적어 주세요.")
-    if len(memo) > limit:
-        raise ValueError(f"업무 메모는 {limit}자 이내로 적어 주세요.")
+    if part not in settings.PART_IDS:
+        raise ValueError(f"업무 번호는 {', '.join(settings.PART_IDS)} 중 하나여야 해요.")
     state = await tick(session_id, now)
     if state["status"] != "in_progress":
         raise RuntimeError("이미 끝난 세션입니다.")
     minute, pack = state["minute"], store.get_session(session_id)["scenario"]
-    mid = store.add_message(session_id, "work", "candidate", memo, minute)
-    category, part = work.resolve(session_id, *await agent_client.classify_memo(session_id, memo, pack), pack)
+    mid = store.add_message(session_id, "work", "candidate", f"{work.part_name(part, pack)} 진행", minute)
+    category, part = work.resolve(session_id, "own", part, pack)
     advanced = work.can_advance(session_id, part, pack)   # 다 끝났거나 장면 영향으로 막히면 오르지 않음
     store.add_work_memo(session_id, mid, category, part, advanced)
     if part:   # 업무 카드 상태도 진척에 맞춘다(business-mcp 변경 도구)

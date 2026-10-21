@@ -9,7 +9,7 @@ import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app import doc_graph, graph, memo_agent, progress, report
+from app import doc_graph, graph, progress, report
 
 log = logging.getLogger("dayzero.agent_server")
 app = FastAPI(title="Day Zero Agent")
@@ -19,12 +19,6 @@ class TurnIn(BaseModel):
     session_id: str
     minute: float
     trigger: dict
-
-
-class MemoIn(BaseModel):
-    session_id: str
-    memo: str
-    pack: str | None = None
 
 
 class DocRequestIn(BaseModel):
@@ -51,13 +45,6 @@ async def turn(body: TurnIn) -> dict:
     """장면 하나 또는 지원자 메시지 하나를 세션 Graph로 처리한다."""
     await graph.run_turn(body.session_id, body.minute, body.trigger)
     return {"ok": True}
-
-
-@app.post("/agent/classify")
-async def classify(body: MemoIn) -> dict:
-    """업무 메모의 범주·업무 번호를 고른다(LLM)."""
-    category, part = await memo_agent.classify(body.session_id, body.memo, body.pack)
-    return {"category": category, "part": part}
 
 
 @app.post("/agent/reports/resume")

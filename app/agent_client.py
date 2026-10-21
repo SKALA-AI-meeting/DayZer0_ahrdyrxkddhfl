@@ -42,15 +42,6 @@ async def run_turn(session_id: str, minute: float, trigger: dict) -> None:
     await graph.run_turn(session_id, minute, trigger)
 
 
-async def classify_memo(session_id: str, memo: str, pack: str | None) -> tuple[str, str]:
-    """업무 메모 → (범주 id, 업무 번호). LLM 분류라 에이전트가 한다."""
-    if _http():
-        out = await _post("/classify", {"session_id": session_id, "memo": memo, "pack": pack})
-        return out["category"], out["part"]
-    from app import memo_agent
-    return await memo_agent.classify(session_id, memo, pack)
-
-
 async def generate_report(session_id: str) -> str:
     """리포트를 만들고 최종 상태(ready | failed | skipped)를 돌려준다. gateway는 백그라운드 작업으로 부른다."""
     if _http():

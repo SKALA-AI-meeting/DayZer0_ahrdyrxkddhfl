@@ -125,8 +125,8 @@ def _pack_public(pack: str) -> dict:
 
 @app.get("/api/scenarios")
 def scenarios() -> list[dict]:
-    """가입 화면에서 고를 시나리오 목록(팩들 + 지원자마다 랜덤). 첫 번째가 기본. 가상 회사 정보뿐이라 로그인 없이 보인다."""
-    return [_pack_public(p) for p in [*settings.pack_ids(), settings.RANDOM_PACK]]
+    """가입 화면에서 고를 시나리오 목록. 첫 번째(지원자마다 랜덤)가 기본. 가상 회사 정보뿐이라 로그인 없이 보인다."""
+    return [_pack_public(p) for p in [settings.RANDOM_PACK, *settings.pack_ids()]]
 
 
 @app.get("/api/admin/scenario")
@@ -179,6 +179,10 @@ class TextIn(BaseModel):
     text: str
 
 
+class PartIn(BaseModel):
+    part: str   # 진행할 업무 번호 "1"~"5"
+
+
 def _msg(m: dict) -> dict:
     return {"id": m["id"], "channel": m["channel"], "sender": m["sender"], "content": m["content"],
             "time": clock.format_minute(m["minute"])}
@@ -229,7 +233,6 @@ async def poll(token: str, after: int = 0) -> dict:
         "progress": _progress_view(s),
         "can_finish": engine.can_finish(s["id"]),
         "work_intro": settings.work_spec(s["scenario"])["intro"],
-        "memo_max_chars": settings.config()["work"]["memo_max_chars"],
         "docs": [{"id": d["id"], "title": d["title"]}
                  for d in docs_module.available(s["company"], state["minute"], s["scenario"])],
         "part_titles": settings.part_titles(s["scenario"]),
@@ -263,11 +266,11 @@ async def send(token: str, body: MessageIn) -> dict:
 
 
 @app.post("/api/invite/{token}/work")
-async def work_step(token: str, body: TextIn) -> dict:
-    """작업 계속하기: 업무 메모를 남기면 정해진 지문이 이어지고 시간이 넘어간다(업무는 직접 하지 않음)."""
+async def work_step(token: str, body: PartIn) -> dict:
+    """이 업무 하기: 고른 업무가 한 칸 진행되고 정해진 지문이 이어지며 시간이 넘어간다(업무는 직접 하지 않음)."""
     s = _candidate(token)
     try:
-        return await engine.work_step(s["id"], body.text)
+        return await engine.work_step(s["id"], body.part)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

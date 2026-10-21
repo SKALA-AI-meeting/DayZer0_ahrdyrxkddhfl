@@ -76,43 +76,46 @@ cd web && npm run dev                      # http://localhost:3000
 - **gateway**는 LLM을 부르지 않습니다. LLM이 필요한 일은 모두 `agent_client.py` 한 곳에서 에이전트 서버로 HTTP 요청합니다. 인증·세션 상태는 SQLite에 직접 읽고 쓰고(업무 서버의 역할), 업무 카드 진척과 문서 원문만 MCP로 다룹니다.
 - **에이전트**는 SQLite를 읽기만 하고, 업무 데이터 변경은 모두 business-mcp 변경 도구로 합니다. 직접 쓰는 것은 LLM 판별 캐시(에이전트 자신의 상태)뿐입니다.
 - 에이전트 서버는 코드 밖 파일(`scenario/` 팩 3개 · `prompts/*.md` · `config.toml`)을 읽고, LLM 호출·검증 기록을 `data/trace.jsonl`(켜면 LangSmith에도)에 남깁니다. 그림에서는 선이 엉키지 않게 뺐습니다.
-- 그림에는 주요 흐름만 그렸습니다. 이 밖에 세션 Graph는 발화 Graph를 불러 대사를 만듭니다. 또 gateway는 인증·세션 상태를 SQLite에 직접 쓰고, 업무 카드 진척·문서 원문 열람은 MCP를 부릅니다(위 첫 항목).
+- 그림에는 주요 흐름만 그렸습니다(실선은 요청·저장, 점선은 LLM 호출). 이 밖에 세션 Graph는 발화 Graph를 불러 대사를 만듭니다. 또 gateway는 인증·세션 상태를 SQLite에 직접 쓰고, 업무 카드 진척·문서 원문 열람은 MCP를 부릅니다(위 첫 항목).
 
 ```mermaid
-%%{init: {"theme": "neutral", "flowchart": {"curve": "linear", "nodeSpacing": 22, "rankSpacing": 70}}}%%
+%%{init: {"theme": "neutral", "flowchart": {"curve": "linear", "nodeSpacing": 22, "rankSpacing": 60}}}%%
 flowchart LR
-    Web["<b>화면</b><br/>Next.js :3000"]
+    Web["<b>화면</b> · Next.js :3000<br/>지원자 가상 오피스<br/>관리자 · 리포트<br/>/api 프록시 · 2초 poll"]
 
     subgraph GWP["gateway :8000 · LLM 호출 없음"]
-        API["<b>업무 API</b><br/>인증 · 권한"]
-        Engine["<b>세션 엔진</b><br/>시계 · 장면 일정 · 업무 진척"]
+        Engine["<b>세션 엔진</b><br/>활성 시간 시계<br/>장면 1회 실행 · 조건부 장면<br/>업무 칸 진척 · 고정 지문"]
+        API["<b>업무 API</b><br/>가입 · 로그인 · 초대 토큰<br/>기업별 데이터 분리"]
     end
 
-    subgraph AGP["에이전트 서버 :8001 · LangGraph · gpt-4o-mini"]
-        SG["<b>세션 Graph</b><br/>장면 · 분업 · 답장"]
-        SPK["<b>발화 Graph</b><br/>생성 → 코드 검증"]
-        OBS["<b>관찰 · 리포트</b><br/>판별 → 규칙 등급"]
-        DOC["<b>문서 등록 Graph</b><br/>승인 대기"]
+    subgraph AGP["에이전트 서버 :8001 · LangGraph · DB 직접 쓰기 없음"]
+        SG["<b>세션 Graph</b><br/>장면 실행 · 분업 협상<br/>답장 라우팅 · 후속 반응"]
+        SPK["<b>발화 Graph</b><br/>생성 → 문서 도구 → 코드 검증<br/>실패 시 재생성 · 대체 문장"]
+        OBS["<b>관찰 · 리포트</b> (백그라운드)<br/>판별 → 인용 · 채널 · 함의 검증<br/>규칙 등급 A~E · 근거 정리"]
+        DOC["<b>문서 등록 Graph</b><br/>개인정보 마스킹<br/>interrupt 승인 대기 → 등록"]
     end
 
-    subgraph MCPP["MCP 서버 · Streamable HTTP"]
-        Business["<b>business-mcp</b> :9101<br/>업무 데이터 조회 · 변경"]
-        RAG["<b>rag-mcp</b> :9102<br/>회사 문서 검색 · 등록"]
+    subgraph MCPP["MCP 서버 · 별도 프로세스 · Streamable HTTP"]
+        Business["<b>business-mcp</b> :9101<br/>조회 도구 4 · 변경 도구 11<br/>값 검사만, 업무 규칙 없음"]
+        RAG["<b>rag-mcp</b> :9102<br/>검색 · 원문 · 등록(승인 토큰)<br/>Resource docs:// · scenario://"]
     end
+
+    Model["<b>OpenAI</b><br/>gpt-4o-mini<br/>text-embedding-3-small"]
 
     subgraph DATA["데이터"]
-        DB[("<b>SQLite</b><br/>업무 원본 · 리포트")]
-        Vec[("<b>벡터 색인</b><br/>문서 임베딩")]
+        DB[("<b>SQLite</b><br/>세션 · 메시지 · 태스크<br/>관찰 · 리포트 · 기업")]
+        Vec[("<b>벡터 색인</b><br/>문서 청크 · 임베딩<br/>실패 시 키워드 검색")]
     end
 
     Web -->|"REST"| API
     Web ~~~ Engine
-    Engine -->|"장면 · 메시지"| SG
     Engine ~~~ SPK
+    Engine -->|"장면 · 메시지"| SG
     Engine -->|"세션 종료"| OBS
     API -->|"문서 승인"| DOC
-    SG -->|"발화 · 분업 저장"| Business
     OBS -->|"관찰 · 리포트 저장"| Business
+    SG -->|"발화 · 분업 저장"| Business
+    AGP -.->|"대사 생성 · 판별"| Model
     SPK -->|"문서 검색"| RAG
     DOC -->|"승인 후 등록"| RAG
     Business --> DB
