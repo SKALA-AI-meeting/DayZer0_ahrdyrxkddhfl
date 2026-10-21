@@ -1,0 +1,60 @@
+# 업무 메모와 지문. 동작 방식은 scenario/moarun/work.toml 머리말과 같다.
+# stage: before = 동료 문제 전 / after_miss = 동료 문제 뒤 / after_pivot = 범위 변경 뒤
+
+# 업무 패널에 늘 보이는 안내(사전 안내와 같은 내용). 연출될 상황은 알리지 않는다.
+intro = "업무는 직접 하지 않아요. '작업 계속하기'에 다음 몇 분 동안 어떤 업무를 할지 짧게 적으면, 그 업무가 한 칸 진행되고 시간이 몇 분 넘어가요. 한 번에 한 업무만 진행되고, 대화만으로는 업무가 진행되지 않아요. 대화는 언제든 할 수 있어요."
+
+[[stage]]
+id = "after_pivot"
+after_scene = "pivot"
+
+[[stage]]
+id = "after_miss"
+after_scene = "coworker_miss"
+
+# 장면이 업무 진척에 주는 영향. 그 장면 전에 쌓은 칸에서 lose칸을 빼고, 그 뒤로는 max칸까지만 채울 수 있다.
+[[effect]]
+after_scene = "pivot"
+part = "2"
+lose = 1     # 웹 화면 위주로 한 현행 분석 일부가 무효
+max = 1      # 모바일 접속 기록은 보안 승인이 마감 뒤에 나와 이번 마감 안에는 1칸까지만
+reason = "모바일 접속 기록은 고객사 보안 승인이 마감 뒤에 나와 이번 마감 안에는 더 진행할 수 없었다"
+notice = "범위가 모바일 화면 위주로 바뀌어 2번 현행 분석의 진척 일부가 무효가 됐다"
+
+# 범주. 지문 틀의 {part}=업무 이름, {done}/{units}=진척 칸. progress = 업무를 한 칸 올리는 범주인가.
+[[category]]
+id = "own"
+label = "내 업무 진행"
+description = "자기가 맡은 업무(현행 분석, 일정·공수 산정, 중간보고 자료 등)를 진행한다"
+progress = true
+progressed = "{part}: 한 칸 진행했다 ({done}/{units}칸)."
+already_done = "{part}: 이미 끝나 있어 더 진행할 것이 없었다."
+after_miss = "동료가 맡았던 업무는 그대로 비어 있다."
+after_pivot = "바뀐 범위(모바일 화면 위주) 기준으로 맞추는 중이다."
+
+[[category]]
+id = "cover"
+label = "동료 업무 메우기"
+description = "동료가 맡은 업무나 비어 있는 부분을 대신 하거나 함께 메운다"
+progress = true
+progressed = "{part}: 동료 업무를 한 칸 메웠다 ({done}/{units}칸). 그만큼 내 업무는 진행되지 않았다."
+already_done = "{part}: 이미 끝나 있어 더 메울 것이 없었다."
+after_pivot = "바뀐 범위(모바일 화면 위주) 기준으로 맞추는 중이다."
+
+[[category]]
+id = "replan"
+label = "계획·우선순위 다시 정하기"
+description = "남은 시간과 업무를 다시 따져 순서·범위·우선순위·일정을 정리한다(특정 업무를 진행하지는 않음)"
+progress = false
+before = "업무 순서와 일정을 정리했다. 무엇을 먼저 할지가 분명해졌다. (업무 진척은 그대로)"
+after_miss = "남은 시간과 업무를 다시 따져 우선순위를 정리했다. 모든 업무를 다 하기는 어렵다는 게 분명해졌다. (업무 진척은 그대로)"
+after_pivot = "바뀐 범위에 맞춰 남은 업무의 우선순위를 다시 정리했다. (업무 진척은 그대로)"
+
+[[category]]
+id = "other"
+label = "기타"
+description = "어떤 업무를 할지 분명하지 않다"
+progress = false
+before = "어떤 업무를 할지 분명하지 않아 업무 진척은 없었다."
+after_miss = "어떤 업무를 할지 분명하지 않아 업무 진척은 없었다."
+after_pivot = "어떤 업무를 할지 분명하지 않아 업무 진척은 없었다."

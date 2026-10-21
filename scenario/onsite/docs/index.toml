@@ -1,0 +1,34 @@
+# 회사 문서 목록 (PRD 6.3, 배경 자료)
+# available_from_minute: 세션 시각이 이 값 이상일 때만 열람·검색 가능 (F-15).
+# 다른 팩과 같이 업무를 지문으로 처리하므로 모든 문서를 처음부터 공개한다(배경 이해용).
+# 본문의 회사·수치·발언은 모두 이 MVP에서 만든 가상 값이다.
+
+[[doc]]
+id = "overview"
+title = "프로젝트 개요"
+file = "overview.md"
+available_from_minute = 0
+
+[[doc]]
+id = "contract"
+title = "계약 범위서"
+file = "contract.md"
+available_from_minute = 0
+
+[[doc]]
+id = "interviews"
+title = "현업 인터뷰 메모"
+file = "interviews.md"
+available_from_minute = 0
+
+[[doc]]
+id = "security"
+title = "고객사 보안 규정"
+file = "security.md"
+available_from_minute = 0
+
+[[doc]]
+id = "weekly"
+title = "지난주 주간보고"
+file = "weekly.md"
+available_from_minute = 0

@@ -1,0 +1,34 @@
+# 회사 문서 목록 (PRD 6.3, 배경 자료)
+# available_from_minute: 세션 시각이 이 값 이상일 때만 열람·검색 가능 (F-15).
+# 모아런 팩과 같이 업무를 지문으로 처리하므로 모든 문서를 처음부터 공개한다(배경 이해용).
+# 본문의 회사·수치·발언은 모두 이 MVP에서 만든 가상 값이다.
+
+[[doc]]
+id = "company"
+title = "회사·팀 소개"
+file = "company.md"
+available_from_minute = 0
+
+[[doc]]
+id = "survey"
+title = "작년 워크숍 설문 결과"
+file = "survey.md"
+available_from_minute = 0
+
+[[doc]]
+id = "policy"
+title = "복리후생·경비 규정"
+file = "policy.md"
+available_from_minute = 0
+
+[[doc]]
+id = "venues"
+title = "장소 후보 메모"
+file = "venues.md"
+available_from_minute = 0
+
+[[doc]]
+id = "meeting"
+title = "지난주 회의록"
+file = "meeting.md"
+available_from_minute = 0
