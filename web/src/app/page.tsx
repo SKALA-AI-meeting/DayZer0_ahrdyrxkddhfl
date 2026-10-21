@@ -1,5 +1,5 @@
 "use client";
-// 첫 화면: 왼쪽은 서비스 소개(진행 방식 · 업무 보드 미리보기), 오른쪽은 입장 창(채용 담당자 / 지원자 탭).
+// 첫 화면: 왼쪽은 서비스 소개(진행 방식), 오른쪽은 입장 창(채용 담당자 / 지원자 탭).
 // 지원자는 가입 없이 초대 링크(또는 코드)로 들어온다(PRD 7.1, F-10).
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -7,13 +7,6 @@ import { useState } from "react";
 import Nav from "@/components/Nav";
 
 type Role = "candidate" | "admin";
-
-// 업무 보드 미리보기(실제 시나리오 내용이 아닌 예시). 어떤 상황이 연출되는지는 보여 주지 않는다.
-const PREVIEW = [
-  { n: "01", title: "자료 조사", owner: "나", done: 1, units: 2 },
-  { n: "02", title: "인터뷰 정리", owner: "동료", done: 0, units: 2 },
-  { n: "03", title: "보고 자료", owner: "나", done: 0, units: 3 },
-];
 
 export default function Home() {
   const router = useRouter();
@@ -46,16 +39,6 @@ export default function Home() {
             <li><b>40분 가상 업무</b><span>메신저로 대화하고 업무 카드를 골라 진행</span></li>
             <li><b>근거 리포트</b><span>역량 5개, 원문·시각과 참고 등급</span></li>
           </ol>
-
-          <div className="home-preview" aria-hidden="true">
-            {PREVIEW.map((c) => (
-              <div key={c.n} className="mini-card">
-                <div className="mini-top"><span className="tnum">{c.n}</span><span className={`owner ${c.owner === "나" ? "candidate" : "coworker"}`}>{c.owner}</span></div>
-                <b>{c.title}</b>
-                <span className="cells">{Array.from({ length: c.units }, (_, i) => <i key={i} className={i < c.done ? "on" : ""} />)}</span>
-              </div>
-            ))}
-          </div>
         </section>
 
         <section className="home-door">

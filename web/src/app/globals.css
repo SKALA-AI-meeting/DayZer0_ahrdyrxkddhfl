@@ -79,14 +79,11 @@ td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line);
 .home-kicker { margin: 0 0 14px; font-size: 13px; font-weight: 600; color: var(--accent-dark); }
 .home-intro h1 { font-size: 46px; line-height: 1.16; letter-spacing: -0.035em; margin-bottom: 18px; }
 .home-lead { font-size: 16px; color: var(--muted); max-width: 520px; margin: 0 0 30px; line-height: 1.75; }
-.home-steps { list-style: none; counter-reset: step; padding: 0; margin: 0 0 30px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; border-top: 1px solid var(--line); padding-top: 18px; }
+.home-steps { list-style: none; counter-reset: step; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; border-top: 1px solid var(--line); padding-top: 18px; }
 .home-steps li { counter-increment: step; display: flex; flex-direction: column; gap: 2px; }
 .home-steps li::before { content: counter(step, decimal-leading-zero); font-family: var(--mono); font-size: 12px; color: var(--accent-dark); margin-bottom: 4px; }
 .home-steps b { font-size: 14px; }
 .home-steps span { font-size: 13px; color: var(--muted); }
-.home-preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 520px; }
-.mini-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
-.mini-top { display: flex; justify-content: space-between; align-items: center; }
 
 .home-door { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 8px; position: sticky; top: 24px; }
 .door-tabs { display: flex; gap: 4px; background: var(--soft); border-radius: 10px; padding: 4px; }
