@@ -66,90 +66,68 @@ cd web && npm run dev                      # http://localhost:3000
 
 ### 시스템 아키텍처
 
+프로세스 5개로 나뉘고, 요청은 위에서 아래로 한 방향으로만 흐릅니다.
+
 ```mermaid
+%%{init: {"theme": "neutral"}}%%
 flowchart TB
-    FE["Next.js 15 Frontend<br/>지원자 가상 오피스(메신저 3채널 · 업무 기록) · 관리자 · 리포트"]
-    GW["API Gateway · FastAPI<br/>app/api.py<br/>토큰 인증 · 라우팅"]
-    AUTH["Auth · app/auth.py<br/>PBKDF2 해시 · HMAC 토큰 발급/검증<br/>지원자 초대 토큰 72시간"]
-    ENG["Session Engine<br/>engine.py · clock.py · work.py<br/>활성 시간 시계 · 장면 정시 1회 실행<br/>조건부 장면 · 업무 메모 → 지문 → 시계 넘기기"]
+    FE["<b>① 화면</b> · Next.js :3000<br/>지원자 가상 오피스<br/>관리자 · 리포트"]
+    GW["<b>② gateway</b> :8000<br/>업무 API · 인증<br/>세션 시계 · 장면 일정<br/><i>LLM을 부르지 않음</i>"]
+    AG["<b>③ 에이전트 서버</b> :8001<br/>세션 Graph · 발화 Graph<br/>문서 등록 Graph<br/>관찰 · 리포트 · 메모 분류<br/><i>DB에 직접 쓰지 않음</i>"]
+    LLM["OpenAI<br/>gpt-4o-mini · embedding"]
 
-    FE -->|"/api 프록시 · 2초마다 poll"| GW
-    GW <-->|"가입·로그인 · 토큰 검증"| AUTH
-    GW -->|"tick · 지원자 메시지 · 업무 메모"| ENG
-
-    subgraph AGENT["AI Agent 서버 :8001 · LangGraph (app/agent_server.py, 별도 프로세스)"]
+    subgraph MCP["④ MCP 서버 · Streamable HTTP"]
         direction LR
-        SG["세션 Graph<br/>graph.py<br/>장면 · 분업 협상 · 답장 라우팅 · 후속 반응"]
-        SPK["발화 Graph<br/>speak_graph.py<br/>생성 → 도구 → 코드 검증 → 재생성/대체"]
-        DOC["문서 등록 Graph<br/>doc_graph.py<br/>마스킹 → interrupt 승인 → 등록"]
-        OBS["관찰 · 리포트<br/>observe.py · report.py<br/>판별 → 인용·채널·함의 검증 · 규칙 관찰 → 근거 정리"]
+        BIZ["<b>business-mcp</b> :9101<br/>업무 데이터 조회 · 변경"]
+        RAG["<b>rag-mcp</b> :9102<br/>문서 검색 · 원문 · 등록"]
     end
 
-    ENG -->|"HTTP: 장면 시각 도달 · 지원자 메시지 · 업무 메모 분류"| SG
-    SG -->|"동료·팀장 발화"| SPK
-    GW -->|"HTTP: 관리자 문서 등록 요청·승인"| DOC
-    ENG -->|"HTTP: 세션 종료 → 리포트(백그라운드)"| OBS
-
-    subgraph MCP["MCP 서버 2개 · 직접 구축 · 별도 프로세스 (Streamable HTTP)"]
+    subgraph DATA["⑤ 데이터"]
         direction LR
-        BIZ["business-mcp :9101<br/>조회: 세션 상태 · 태스크 · 업무 기록 · 관찰<br/>변경: 분업 · 카드 상태 · 메시지 · 진행 단계 · 장면 기록<br/>관찰 · 리포트 · 문서 요청 (값 검사는 서버가)"]
-        RAG["rag-mcp :9102<br/>조회: list · search · read_company_doc<br/>변경: register_company_doc (승인 토큰 필수)<br/>Resource: docs:// · scenario://"]
+        DB[("SQLite<br/>세션 · 메시지 · 리포트")]
+        VEC[("벡터 색인<br/>문서 청크 · 임베딩")]
     end
 
-    SPK -->|"회사 문서 검색·읽기"| MCP
-    SG -->|"발화·지문 기록 · 진행 단계 · 분담 확정 · 후속 반응 1회"| BIZ
-    OBS -->|"관찰 · 리포트 저장"| BIZ
-    DOC -->|"등록 요청 · 결과 기록"| BIZ
-    DOC -->|"승인 후 등록"| RAG
-    GW -->|"문서 원문 열람 · 공개 시각 확인"| RAG
+    FE -->|"/api"| GW
+    GW -->|"HTTP"| AG
+    AG -.->|"LLM 호출"| LLM
+    AG -->|"MCP"| BIZ
+    AG -->|"MCP"| RAG
+    GW -->|"인증 · 세션 상태"| DB
+    BIZ --> DB
+    RAG --> VEC
+```
 
-    LLM["OpenAI gpt-4o-mini<br/>발화 · 메모 분류 · 판별 · 함의 검증 · 근거 정리"]
-    EMB["OpenAI text-embedding-3-small"]
-    SPK -.->|"LLM 호출"| LLM
-    OBS -.->|"LLM 호출"| LLM
+| 계층 | 하는 일 | 하지 않는 일 (교안 금지 사항, 테스트로 검사) |
+|---|---|---|
+| ① 화면 | 입력, 진행 상태·근거·승인 화면 | 권한 판단, 에이전트 직접 호출 |
+| ② gateway | 업무 API, 인증, 세션 시계·장면 일정 | LLM 호출, 에이전트 모듈 직접 호출 |
+| ③ 에이전트 | 대사·답장 생성, 도구 선택, 관찰·리포트, 승인 대기 | DB 직접 쓰기 (업무 데이터 변경은 business-mcp로만) |
+| ④ MCP | 조회·변경 도구, 값 검사, 문서 검색·출처 | 업무 규칙 복제, rag-mcp의 업무 데이터 변경 |
 
-    subgraph DB["SQLite · data/dayzero.sqlite3 (기업별 데이터 분리)"]
-        direction LR
-        T1["세션<br/>sessions · messages(team·dm·lead_dm·work)<br/>tasks · scene_runs · work_memos"]
-        T2["관찰 · 리포트<br/>observations · reports<br/>judge_cache"]
-        T3["기업 · 인증<br/>admins · company_settings"]
-        T4["회사 문서<br/>company_docs · doc_requests"]
-    end
-    VEC["Vector Index<br/>doc_chunks · query_embeddings<br/>SQLite + 코사인 유사도"]
+### 지원자 메시지 하나가 처리되는 길
 
-    BIZ --> T1
-    BIZ --> T2
-    RAG --> T4
-    GW --> T3
-    RAG -->|"벡터 검색 · 실패 시 키워드"| VEC
-    VEC -.->|"색인·질의 임베딩"| EMB
+```mermaid
+%%{init: {"theme": "neutral"}}%%
+sequenceDiagram
+    participant FE as 화면
+    participant GW as gateway (8000)
+    participant AG as 에이전트 (8001)
+    participant RAG as rag-mcp
+    participant BIZ as business-mcp
+    participant LLM as OpenAI
 
-    FILES["scenario/ 팩 · prompts/*.md · config.toml<br/>코드 밖의 시나리오 · 지시문 · 숫자"]
-    OBSV["Observability<br/>LangSmith (metadata session_id · node)<br/>data/trace.jsonl"]
-    AGENT -.-> FILES
-    AGENT -.-> OBSV
-
-    classDef fe fill:#d9f2d0,stroke:#6aa84f,color:#000
-    classDef gw fill:#f8d7da,stroke:#c0392b,color:#000
-    classDef side fill:#fff2cc,stroke:#d6b656,color:#000
-    classDef agent fill:#dae8fc,stroke:#6c8ebf,color:#000
-    classDef mcp fill:#ffe6a7,stroke:#d6a01e,color:#000
-    classDef ai fill:#e1d5e7,stroke:#9673a6,color:#000
-    classDef db fill:#e8eef7,stroke:#7a8fb3,color:#000
-    classDef vec fill:#ffe0b2,stroke:#e69138,color:#000
-    classDef etc fill:#f3f3f3,stroke:#999999,color:#000
-    class FE fe
-    class GW gw
-    class AUTH,ENG side
-    class SG,SPK,DOC,OBS agent
-    class BIZ,RAG mcp
-    class LLM,EMB ai
-    class T1,T2,T3,T4 db
-    class VEC vec
-    class FILES,OBSV etc
-    style AGENT fill:#f5f8fd,stroke:#c0392b,stroke-dasharray: 6 4
-    style MCP fill:#fffaf0,stroke:#d6a01e
-    style DB fill:#f7f9fc,stroke:#7a8fb3
+    FE->>GW: 메시지 보내기
+    GW->>GW: 지원자 메시지 저장 · 세션 시계
+    GW->>AG: POST /agent/turn
+    AG->>LLM: 답장 생성 (도구 선택)
+    AG->>RAG: search_company_docs
+    RAG-->>AG: 관련 문단 + 출처
+    AG->>AG: 코드 검증 (판정 발언 · 출처 · 칭찬 · 필수 내용)<br/>실패하면 이유를 알려 다시 생성
+    AG->>BIZ: post_message
+    BIZ->>BIZ: 값 검사 후 저장
+    FE->>GW: 2초마다 조회
+    GW-->>FE: 새 메시지
 ```
 
 **핵심 흐름: 40분 가상 업무를 시간에 맞춰 진행하고, AI가 만든 것은 코드가 검증한 뒤에만 내보냄**
