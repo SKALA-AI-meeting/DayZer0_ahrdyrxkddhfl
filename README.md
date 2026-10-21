@@ -72,34 +72,24 @@ cd web && npm run dev                      # http://localhost:3000
 
 ### 시스템 아키텍처
 
-프로세스 5개로 나뉘고, 요청은 위에서 아래로 한 방향으로만 흐릅니다.
+프로세스 5개(①~④)로 나뉘고, 요청은 왼쪽에서 오른쪽으로 한 방향으로만 흐릅니다. gateway는 인증·세션 상태를 SQLite에 직접 읽고 쓰고(업무 서버의 역할), 에이전트는 DB에 직접 쓰지 않고 business-mcp를 거칩니다.
 
 ```mermaid
-%%{init: {"theme": "neutral"}}%%
-flowchart TB
-    FE["<b>① 화면</b> · Next.js :3000<br/>지원자 가상 오피스<br/>관리자 · 리포트"]
-    GW["<b>② gateway</b> :8000<br/>업무 API · 인증<br/>세션 시계 · 장면 일정<br/><i>LLM을 부르지 않음</i>"]
-    AG["<b>③ 에이전트 서버</b> :8001<br/>세션 Graph · 발화 Graph<br/>문서 등록 Graph<br/>관찰 · 리포트 · 메모 분류<br/><i>DB에 직접 쓰지 않음</i>"]
-    LLM["OpenAI<br/>gpt-4o-mini · embedding"]
+%%{init: {"theme": "neutral", "flowchart": {"curve": "linear", "nodeSpacing": 24, "rankSpacing": 50}}}%%
+flowchart LR
+    FE["<b>① 화면</b><br/>Next.js :3000"]
+    GW["<b>② gateway</b> :8000<br/>API · 인증 · 세션 시계"]
+    AG["<b>③ 에이전트 서버</b> :8001<br/>LangGraph · 코드 검증<br/>LLM: OpenAI"]
 
-    subgraph MCP["④ MCP 서버 · Streamable HTTP"]
-        direction LR
-        BIZ["<b>business-mcp</b> :9101<br/>업무 데이터 조회 · 변경"]
-        RAG["<b>rag-mcp</b> :9102<br/>문서 검색 · 원문 · 등록"]
+    subgraph MCP["④ MCP 서버 · HTTP"]
+        BIZ["business-mcp :9101<br/>업무 데이터"]
+        RAG["rag-mcp :9102<br/>회사 문서"]
     end
 
-    subgraph DATA["⑤ 데이터"]
-        direction LR
-        DB[("SQLite<br/>세션 · 메시지 · 리포트")]
-        VEC[("벡터 색인<br/>문서 청크 · 임베딩")]
-    end
+    DB[("SQLite")]
+    VEC[("벡터 색인")]
 
-    FE -->|"/api"| GW
-    GW -->|"HTTP"| AG
-    AG -.->|"LLM 호출"| LLM
-    AG -->|"MCP"| BIZ
-    AG -->|"MCP"| RAG
-    GW -->|"인증 · 세션 상태"| DB
+    FE --> GW --> AG --> MCP
     BIZ --> DB
     RAG --> VEC
 ```
@@ -123,15 +113,13 @@ sequenceDiagram
     participant BIZ as business-mcp
     participant LLM as OpenAI
 
-    FE->>GW: 메시지 보내기
-    GW->>GW: 지원자 메시지 저장 · 세션 시계
+    FE->>GW: 메시지 보내기 (gateway가 저장)
     GW->>AG: POST /agent/turn
     AG->>LLM: 답장 생성 (도구 선택)
     AG->>RAG: search_company_docs
     RAG-->>AG: 관련 문단 + 출처
-    AG->>AG: 코드 검증 (판정 발언 · 출처 · 칭찬 · 필수 내용)<br/>실패하면 이유를 알려 다시 생성
-    AG->>BIZ: post_message
-    BIZ->>BIZ: 값 검사 후 저장
+    AG->>AG: 코드 검증, 실패하면 다시 생성
+    AG->>BIZ: post_message (값 검사 후 저장)
     FE->>GW: 2초마다 조회
     GW-->>FE: 새 메시지
 ```
