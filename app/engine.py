@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 
-from app import clock, docs, graph, guard, llm, observe, persona, report, settings, store, work
+from app import agent_client, clock, docs, guard, llm, observe, persona, settings, store, work
 from app.mcp_client import call_business
 
 log = logging.getLogger("dayzero.engine")
@@ -46,7 +46,7 @@ async def tick(session_id: str, now: float | None = None) -> dict:
             llm.trace({"session": session_id, "node": "engine.skip_scene", "scene": scene["id"]})
             continue
         try:
-            await graph.run_turn(session_id, minute, {"kind": "scene", "scene_id": scene["id"]})
+            await agent_client.run_turn(session_id, minute, {"kind": "scene", "scene_id": scene["id"]})
         except Exception:
             # 실패한 장면은 실행 표시를 지워 다음 tick에서 다시 시도한다(빠짐없이, F-23).
             store.unclaim_scene(session_id, scene["id"])
@@ -107,7 +107,7 @@ async def send_message(session_id: str, channel: str, text: str, now: float | No
     if role == "coworker" and await reveal_early(session_id, text, minute):
         return
     try:
-        await graph.run_turn(session_id, minute, {"kind": "candidate", "channel": channel, "text": text})
+        await agent_client.run_turn(session_id, minute, {"kind": "candidate", "channel": channel, "text": text})
     except Exception:   # 재시도 후에도 실패: 500 대신 정해진 문장으로 답하고 원인은 로그에 남긴다(PRD A.4)
         log.exception("답장 생성 실패: session=%s channel=%s", session_id, channel)
         store.add_message(session_id, channel, role,
@@ -121,7 +121,7 @@ async def _run_scene_now(session_id: str, scene_id: str, minute: float) -> bool:
     if not store.claim_scene(session_id, scene_id, minute):
         return False
     try:
-        await graph.run_turn(session_id, minute, {"kind": "scene", "scene_id": scene_id})
+        await agent_client.run_turn(session_id, minute, {"kind": "scene", "scene_id": scene_id})
     except Exception:
         store.unclaim_scene(session_id, scene_id)
         log.exception("장면 앞당겨 실행 실패: session=%s scene=%s", session_id, scene_id)
@@ -212,7 +212,7 @@ async def work_step(session_id: str, memo: str, now: float | None = None) -> dic
         raise RuntimeError("이미 끝난 세션입니다.")
     minute, pack = state["minute"], store.get_session(session_id)["scenario"]
     mid = store.add_message(session_id, "work", "candidate", memo, minute)
-    category, part = work.resolve(session_id, *await work.classify(session_id, memo, pack), pack)
+    category, part = work.resolve(session_id, *await agent_client.classify_memo(session_id, memo, pack), pack)
     advanced = work.can_advance(session_id, part, pack)   # 다 끝났거나 장면 영향으로 막히면 오르지 않음
     store.add_work_memo(session_id, mid, category, part, advanced)
     if part:   # 업무 카드 상태도 진척에 맞춘다(business-mcp 변경 도구)
@@ -249,7 +249,7 @@ def finish(session_id: str) -> str:
 
 def schedule_report(session_id: str) -> None:
     """리포트 생성을 백그라운드 작업으로 시작한다(실행 중인 이벤트 루프 안에서 부른다)."""
-    task = asyncio.get_running_loop().create_task(report.generate_with_retry(session_id))
+    task = asyncio.get_running_loop().create_task(agent_client.generate_report(session_id))
     _report_tasks.add(task)
     task.add_done_callback(_report_tasks.discard)
 

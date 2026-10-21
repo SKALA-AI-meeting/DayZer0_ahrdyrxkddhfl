@@ -1,4 +1,4 @@
-"""rag-mcp: 회사 문서 MCP 서버 (직접 구축, stdio).
+"""rag-mcp: 회사 문서 MCP 서버 (직접 구축, Streamable HTTP :9102 또는 stdio).
 
 - 조회 도구: list_company_docs, search_company_docs, read_company_doc
 - 변경 도구: register_company_doc (destructiveHint, 사람 승인 토큰 필수, F-06)
@@ -10,7 +10,7 @@
 
 검색은 config [rag].search_mode: vector(미리 색인한 임베딩 유사도, app/embedding.py) 또는 keyword.
 vector에서 임베딩 호출이 실패하면 keyword로 대신 찾는다(Recovery). 결과마다 via로 방식을 밝힌다.
-실행: uv run python -m mcp_servers.rag
+실행: uv run python -m mcp_servers.rag --http   (인자 없이 실행하면 stdio)
 """
 import logging
 import re
@@ -156,4 +156,5 @@ def read_brief(pack: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    from mcp_servers import serve
+    serve(mcp, "rag")

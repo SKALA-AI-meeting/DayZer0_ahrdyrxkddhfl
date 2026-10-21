@@ -49,7 +49,7 @@ function LoginForm() {
           {mode === "signup" && <input placeholder="회사 이름 (예: 루프랩)" value={company} onChange={(e) => setCompany(e.target.value)} />}
           {mode === "signup" && (
             <label className="small muted">
-              업무 시나리오 (가입 뒤에는 바꿀 수 없어요. 모든 지원자가 이 시나리오로 평가받습니다)
+              업무 시나리오 (가입 뒤에는 바꿀 수 없어요. 랜덤을 고르면 지원자마다 다른 이야기를 받고, 체크 항목은 같아요)
               <select value={scenario} onChange={(e) => setScenario(e.target.value)} style={{ width: "100%", marginTop: 4 }}>
                 {scenarios.map((s, i) => (
                   <option key={s.id} value={s.id}>{s.company} · {s.task_title}{i === 0 ? " (기본)" : ""}</option>

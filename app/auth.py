@@ -46,14 +46,15 @@ def signup(email: str, password: str, company: str, scenario: str = "") -> str:
         AuthError: 입력이 비었거나, 이미 가입한 이메일이거나, 이미 등록된 회사 이름(한 회사 한 계정, F-01),
             또는 없는 시나리오.
 
-    시나리오는 가입할 때 한 번 정하고 바꾸지 않는다. 같은 회사 지원자는 모두 같은 조건(PRD 5.5).
+    시나리오는 가입할 때 한 번 정하고 바꾸지 않는다. 팩 하나를 고르면 같은 회사 지원자는 모두 같은 이야기,
+    RANDOM_PACK을 고르면 지원자마다 무작위 팩(체크 목록은 같고 이야기만 달라 지원자가 예측하기 어렵다).
     """
-    from app.settings import default_pack, pack_ids
+    from app.settings import RANDOM_PACK, default_pack, pack_ids
     email, company = email.strip().lower(), " ".join(company.split())
     if not email or not company or len(password) < 8:
         raise AuthError("이메일·회사 이름을 입력하고 비밀번호는 8자 이상으로 해 주세요.")
     scenario = scenario or default_pack()
-    if scenario not in pack_ids():
+    if scenario not in pack_ids() and scenario != RANDOM_PACK:
         raise AuthError(f"없는 시나리오입니다: {scenario}")
     salt = secrets.token_hex(16)
     result = store.create_admin(email, company, salt, _hash(password, salt))
@@ -105,11 +106,12 @@ def verify_token(token: str) -> dict:
 def create_invite(company: str, alias: str, email: str) -> dict:
     """1회용 초대 링크를 만든다(F-02). 실명 대신 별칭을 쓴다(PRD 5.5).
 
-    시나리오 팩은 초대마다 고르지 않고 기업에 정해진 팩을 쓴다(같은 기업 지원자는 같은 조건).
+    시나리오 팩은 기업에 정해진 팩을 쓰고, 기업이 RANDOM_PACK을 골랐으면 초대마다 무작위로 고른다.
     """
+    from app.settings import pick_pack
     if not alias.strip():
         raise AuthError("지원자 별칭을 입력해 주세요.")
-    scenario = store.company_scenario(company)
+    scenario = pick_pack(store.company_scenario(company))
     token = secrets.token_urlsafe(24)
     expires = time.time() + config()["session"]["invite_ttl_hours"] * SECONDS_PER_HOUR
     sid = store.create_session(alias.strip(), company=company, email=email.strip(),

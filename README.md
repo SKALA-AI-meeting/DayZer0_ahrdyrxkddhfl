@@ -4,7 +4,7 @@
 
 - 기획 기준: 팀 결정(2026-10-20 Slack) — "인성을 판단하는 과제 서비스. 팀장이 미션을 주고 팀원과 협업하면서 역량을 평가한다." 역량은 **책임감·성실성 / 계획성·꼼꼼함 / 적응성·유연성 / 협업·조율 / 정직·공정한 보고**, 시나리오는 각자 설계. 공통 PRD 버전(AI 어시스턴트·기획안 작성·2시간)은 태그 `v1-common-prd`에 그대로 남아 있습니다.
 - **능력이 아니라 태도를 본다**: 업무 내용은 직접 하지 않습니다. 지원자는 대화하고, "작업 계속하기"에 어떤 업무를 할지 짧게 적으면(주관식 업무 메모) **그 업무 하나가 한 칸** 오르고 시간이 몇 분 넘어갑니다. 업무별 칸 수 합계가 40분 안에 할 수 있는 횟수보다 많아, 누구도 모든 업무를 끝낼 수 없습니다(진행 방식은 사전 안내, 칸 수 설계는 디브리핑에서 공개). 대화만으로는 업무가 진행되지 않습니다.
-- 상태: 화면·API·에이전트·MCP 2개·벡터 검색·리포트까지 처음부터 끝까지 동작. 테스트 121개, 실제 LLM 평가셋(튜닝 10사례 + 홀드아웃 4사례, 발화 검증, 검색) 포함.
+- 상태: 화면·API·에이전트·MCP 2개·벡터 검색·리포트까지 처음부터 끝까지 동작. 테스트 156개, 실제 LLM 평가셋(튜닝 10사례 + 홀드아웃 4사례, 발화 검증, 검색) 포함.
 
 ---
 
@@ -19,9 +19,14 @@ cd web && npm ci && cd ..                  # 화면 의존성
 ```
 
 ```bash
-# 터미널 1: 백엔드(gateway + 에이전트). MCP 서버 2개는 에이전트가 stdio로 자동 실행
+# 터미널 1·2: MCP 서버 2개 (별도 프로세스, Streamable HTTP :9101 / :9102)
+uv run python -m mcp_servers.business --http
+uv run python -m mcp_servers.rag --http
+# 터미널 3: 에이전트 서버(LLM을 부르는 쪽). MCP 서버에 주소로 연결(config [mcp])
+uv run uvicorn app.agent_server:app --port 8001
+# 터미널 4: gateway(업무 API·인증·세션 시계). 에이전트는 HTTP로 부름(config [agent])
 uv run uvicorn app.api:app --port 8000
-# 터미널 2: 화면
+# 터미널 5: 화면
 cd web && npm run dev                      # http://localhost:3000
 ```
 
@@ -29,8 +34,8 @@ cd web && npm run dev                      # http://localhost:3000
 
 | 명령 | 하는 일 |
 |---|---|
-| `uv run python -m app.cli` | 화면 없이 40분 세션을 가짜 시계로 몇 분 만에 끝까지 돌리고 리포트 출력(대본 `eval/scripts/demo.toml`) |
-| `uv run --group dev python -m pytest -q` | 테스트 110개 (LLM·네트워크 없이) |
+| `uv run python -m app.cli` | 화면 없이 40분 세션을 가짜 시계로 몇 분 만에 끝까지 돌리고 리포트 출력(대본 `eval/scripts/demo.toml`). 에이전트·MCP 서버가 떠 있어야 함(또는 config `[agent] mode = "inprocess"`, `[mcp] transport = "stdio"`) |
+| `uv run --group dev python -m pytest -q` | 테스트 156개 (LLM·네트워크 없이, MCP는 stdio, 에이전트는 같은 프로세스) |
 | `uv run python eval/run_eval.py 3` | 관찰 판별 평가(튜닝 평가셋 10사례, A/B 비교, 3회 반복) |
 | `uv run python eval/run_eval.py 3 holdout` | 관찰 판별 평가(홀드아웃 4사례: 체크 정의를 고칠 때 보지 않은 사례) |
 | `uv run python eval/run_verify_eval.py 3` | 발화 검증 평가(필수 내용·지시 노출·출처·레드팀) |
@@ -72,7 +77,7 @@ flowchart TB
     GW <-->|"가입·로그인 · 토큰 검증"| AUTH
     GW -->|"tick · 지원자 메시지 · 업무 메모"| ENG
 
-    subgraph AGENT["AI Agent · LangGraph (gateway와 같은 프로세스)"]
+    subgraph AGENT["AI Agent 서버 :8001 · LangGraph (app/agent_server.py, 별도 프로세스)"]
         direction LR
         SG["세션 Graph<br/>graph.py<br/>장면 · 분업 협상 · 답장 라우팅 · 후속 반응"]
         SPK["발화 Graph<br/>speak_graph.py<br/>생성 → 도구 → 코드 검증 → 재생성/대체"]
@@ -80,20 +85,21 @@ flowchart TB
         OBS["관찰 · 리포트<br/>observe.py · report.py<br/>판별 → 인용·채널·함의 검증 · 규칙 관찰 → 근거 정리"]
     end
 
-    ENG -->|"장면 시각 도달 · 지원자 메시지"| SG
+    ENG -->|"HTTP: 장면 시각 도달 · 지원자 메시지 · 업무 메모 분류"| SG
     SG -->|"동료·팀장 발화"| SPK
-    GW -->|"관리자: 문서 등록 요청·승인"| DOC
-    ENG -->|"세션 종료 → 백그라운드 작업"| OBS
+    GW -->|"HTTP: 관리자 문서 등록 요청·승인"| DOC
+    ENG -->|"HTTP: 세션 종료 → 리포트(백그라운드)"| OBS
 
-    subgraph MCP["MCP stdio · 직접 구축 2개"]
+    subgraph MCP["MCP 서버 2개 · 직접 구축 · 별도 프로세스 (Streamable HTTP)"]
         direction LR
-        BIZ["business-mcp<br/>조회: 세션 상태 · 태스크 · 업무 기록 · 관찰<br/>변경: assign_tasks · update_task_status · save_observation"]
-        RAG["rag-mcp<br/>조회: list · search · read_company_doc<br/>변경: register_company_doc (승인 토큰 필수)<br/>Resource: docs:// · scenario://"]
+        BIZ["business-mcp :9101<br/>조회: 세션 상태 · 태스크 · 업무 기록 · 관찰<br/>변경: 분업 · 카드 상태 · 메시지 · 진행 단계 · 장면 기록<br/>관찰 · 리포트 · 문서 요청 (값 검사는 서버가)"]
+        RAG["rag-mcp :9102<br/>조회: list · search · read_company_doc<br/>변경: register_company_doc (승인 토큰 필수)<br/>Resource: docs:// · scenario://"]
     end
 
     SPK -->|"회사 문서 검색·읽기"| MCP
-    SG -->|"분담 확정 · 동료 카드 완료"| BIZ
-    OBS -->|"관찰 결과 저장"| BIZ
+    SG -->|"발화·지문 기록 · 진행 단계 · 분담 확정 · 후속 반응 1회"| BIZ
+    OBS -->|"관찰 · 리포트 저장"| BIZ
+    DOC -->|"등록 요청 · 결과 기록"| BIZ
     DOC -->|"승인 후 등록"| RAG
     GW -->|"문서 원문 열람 · 공개 시각 확인"| RAG
 
@@ -159,7 +165,7 @@ flowchart TB
 |---|---|
 | `app/` | gateway, 세션 시계, Graph 3개, 발화 검증, 업무 메모(`work.py`), 관찰·리포트, 인증, 저장소 |
 | `mcp_servers/` | **직접 만든 MCP 서버 2개** (business, rag) |
-| `scenario/moarun/` | 시나리오 팩: 장면(`events.toml`), 역량·체크(`observation.toml`), 업무 메모 범주와 지문(`work.toml`), 회사 문서 |
+| `scenario/moarun/`, `scenario/workshop/`, `scenario/onsite/` | 시나리오 팩 3개: 장면(`events.toml`), 역량·체크(`observation.toml`), 업무 메모 범주와 지문(`work.toml`), 회사 문서 |
 | `prompts/` | 동료·팀장·판별기·요약기 지시문 (코드 밖에서 관리) |
 | `config.toml` | 사람이 고른 숫자 전부 (값마다 "무엇을 조절하고 크면/작으면 어떻게 되는지" 주석) |
 | `web/` | 관리자·지원자 화면 |
@@ -167,9 +173,37 @@ flowchart TB
 
 ---
 
+### 레퍼런스 구성 요소별 역할과 금지 사항 (교안 52쪽)
+
+평가에서 보는 "금지 사항을 어긴 코드가 없는지"를 구성 요소마다 정리했습니다. ✅는 테스트로 강제하는 것입니다.
+
+| 구성 요소 | 이 MVP | 역할 | 금지 사항과 지킨 근거 |
+|---|---|---|---|
+| 화면 (Vue 3) | Next.js `web/` | 질문 입력, 진행 상태·근거·승인 화면 | 권한 판단·AI 서버 직접 호출 금지 → 모든 요청은 `/api` 프록시로 gateway만 부름. 권한은 gateway의 토큰 검증(`app/api.py _admin`, 초대 토큰) |
+| 업무 서버 (Spring Boot) | gateway :8000 — `app/api.py` + `auth.py` + 세션 엔진(`engine.py`·`clock.py`·`work.py`) | 업무 API, 인증, 세션 시계·장면 일정, 상태 저장 | ✅ LLM 호출 금지 → LLM이 필요한 일(장면 대사·답장·업무 메모 분류·관찰·리포트·문서 등록)은 모두 `app/agent_client.py`로 에이전트 서버에 HTTP 요청. gateway 모듈이 LLM을 부르거나 에이전트 모듈을 불러오지 않는지 테스트로 검사 |
+| Agent (FastAPI Agent) | 에이전트 서버 :8001 `app/agent_server.py` — `graph.py`·`speak_graph.py`·`persona.py`·`doc_graph.py`·`observe.py`·`report.py`·`memo_agent.py` | Harness로 모델 감싸기, 도구 선택, 승인 대기(interrupt) | ✅ **DB 직접 쓰기 금지** → 업무 데이터 변경은 business-mcp 변경 도구로만(`tests/test_architecture.py`가 에이전트 모듈의 직접 쓰기 코드를 검사). LLM 판별 캐시만 에이전트 자신의 상태로 직접 저장(체크포인터와 같은 성격) |
+| business-mcp | `mcp_servers/business.py` (:9101, 별도 프로세스) | 조회·변경 도구 | 업무 규칙 복제 금지 → 값 검사(채널·발신자·단계·분업·요청 상태)만 하고 업무 규칙(장면 일정, 등급 계산)은 두지 않음. ✅ 에이전트는 지원자 이름으로 메시지를 쓸 수 없음 |
+| rag-mcp | `mcp_servers/rag.py` (:9102, 별도 프로세스) | 벡터 검색, 출처 반환, 원문 Resource | ✅ 업무 데이터 변경 금지 → 회사 문서 등록(승인 토큰 필수) 외에는 쓰지 않음 |
+| PostgreSQL / Vector DB | SQLite + 임베딩 색인 | 업무 데이터, 작업 이력, 문서 chunk·임베딩 | 해당 없음 (§8: SQLite를 쓴 이유) |
+
+**프로세스 5개**: 화면(:3000) → gateway(:8000) → 에이전트 서버(:8001) → business-mcp(:9101)·rag-mcp(:9102). gateway는 에이전트를 `app/agent_client.py` 하나로만 부르고, config `[agent] mode`로 HTTP(실행)·같은 프로세스(테스트)를 고릅니다. 결과와 예외 종류(400·404·409 → ValueError·KeyError·RuntimeError)는 두 방식이 같습니다.
+
+**남은 한계**: business-mcp가 gateway 내부 API 대신 SQLite를 직접 읽고 씁니다(§8). 화면은 SSE 대신 2초 조회(poll)입니다. 에이전트 서버는 진행 이벤트를 메모리에 두므로 여러 대로 늘리려면 DB나 큐로 옮겨야 합니다.
+
 ### 시나리오 팩: 데이터만 바꾸면 다른 회사·다른 상황
 
-장면·역량·체크·업무 지문·회사 문서·인물이 모두 `scenario/<팩>/` 데이터라서, 에이전트 코드는 그대로 두고 팩만 바꾸면 다른 시뮬레이션이 됩니다. 장면 규칙(앞당김·건너뜀·후속 반응·인물만 아는 사실)도 `events.toml`의 필드로 정합니다. 시나리오는 **기업 단위**로 정합니다(회사 계정을 만들 때 고르고 바꿀 수 없음, PRD 5.5 "조건은 모두에게 같다"). 이 브랜치에는 인성 포커스 팩(`moarun`) 하나만 있습니다.
+장면·역량·체크·업무 지문·회사 문서·인물이 모두 `scenario/<팩>/` 데이터라서, 에이전트 코드는 그대로 두고 팩만 바꾸면 다른 시뮬레이션이 됩니다. 장면 규칙(앞당김·건너뜀·후속 반응·인물만 아는 사실)도 `events.toml`의 필드로 정합니다. 시나리오는 **기업 단위**로 정합니다(회사 계정을 만들 때 고르고 바꿀 수 없음, PRD 5.5 "조건은 모두에게 같다").
+
+팩은 3개입니다. **체크 목록(역량 5개, 체크 id·방향, 규칙 관찰)은 모든 팩이 같고**, 이야기·사건의 종류·시각만 달라 지원자가 다른 팩 경험으로 상황을 예측하기 어렵게 했습니다. 같은 체크 목록과 장면 뼈대는 `tests/test_packs.py`가 강제합니다.
+
+기업은 가입할 때 팩 하나를 고르거나 **"지원자마다 랜덤"**을 고를 수 있습니다. 랜덤이면 초대할 때마다 팩을 무작위로 골라 세션에 저장하고(`app/settings.py pick_pack`), 관리자 화면의 지원자 목록에 지원자별 시나리오가 보입니다. 같은 회사 지원자끼리 이야기를 공유해도 다음 지원자가 같은 상황을 받는다는 보장이 없습니다. 대신 PRD 5.5("조건은 모두에게 같다")에서 벗어납니다. 체크 목록은 같아 등급을 나란히 볼 수 있지만 팩 사이 난이도가 같다는 검증은 아직 없습니다.
+
+| | `moarun` (업무) | `workshop` (업무 밖) | `onsite` (고객사 상주) |
+|---|---|---|---|
+| 미션 | 러닝 앱 재참여율 개선 방향 | 다음 달 전사 워크숍(30명) 기획안 | SI 회사 직원이 고객사 한결물류에 상주하며 배송 조회 화면 개선 요구사항 정리 |
+| 동료 문제 | 다른 급한 업무에 **차출** (00:15) | 장소 가예약 날짜를 잘못 잡는 **실수** (00:13) | 고객사 과장의 범위 밖 요청을 **팀장 몰래 처리**하다 업무 공백 (00:17) → 팀장에게 알리는지가 책임감·정직과 이어짐 |
+| 조건 변경 | 대상을 "오래 안 나온 사용자"로 (00:22) | "가까운 곳에서 당일"로 (00:21) | 범위를 "모바일 화면 위주"로, 필요한 데이터는 고객사 보안 승인 뒤 (00:24) |
+| 추가 장면 | 없음 | 동료가 다른 팀 리드를 **험담** (00:08). 사실 그 리드는 출시 마감 중(회의록) → 같이 험담하면 협업·조율의 부정 행동(`blamed`)으로 기록 | 없음 |
 
 | `events.toml` 장면 필드 | 하는 일 |
 |---|---|
@@ -185,10 +219,10 @@ flowchart TB
 | 항목 (배점) | 이 MVP에서 | 위치 |
 |---|---|---|
 | Biz (10) | 리모트 스타트업 대상 B2B2C 인성(협업 태도) 평가 | PRD, 팀 결정 |
-| 아키텍처 (10) | 화면·gateway·agent·MCP 2개 분리, 품질 특성 대응(아래) | §2, §8 |
+| 아키텍처 (10) | 화면·gateway·에이전트 서버·MCP 2개를 별도 프로세스 5개로 분리, 레퍼런스 금지 사항 준수표와 테스트(gateway의 LLM 호출 없음, 에이전트의 DB 직접 쓰기 없음), 품질 특성 대응 | §2, §8, `tests/test_architecture.py` |
 | AI Agent 설계 (15) | State + Graph 3개, 분기·반복(아래 §4), 장면 규칙(앞당김·건너뜀·후속 반응) | `app/graph.py`, `app/speak_graph.py`, `app/doc_graph.py`, `app/engine.py` |
 | AI Agent 구현 (15) | 모델이 도구를 골라 근거와 함께 답함, 상태 저장·재개(interrupt), **진행 이벤트** | `app/speak_graph.py`, `app/progress.py` |
-| MCP (20) | 직접 구축 2개, 조회·변경 도구 + Resource, 오류 처리 | §5, `mcp_servers/` |
+| MCP (20) | 직접 구축 2개(Streamable HTTP :9101/:9102), 조회·변경 도구 + Resource, 에이전트의 모든 업무 데이터 쓰기가 MCP 경유, 서버 쪽 값 검사, 오류 처리 | §5, `mcp_servers/` |
 | Harness (20) | 8요소 + 평가 | §6, §7 |
 | 인증 (10) | 관리자 가입·로그인(PBKDF2 + HMAC 토큰, 기업별 데이터 분리), 지원자 1회용 초대 토큰(72시간) | `app/auth.py` |
 | 대기열 (가산점) | 이번 MVP 제외. 리포트는 백그라운드 작업 + 재시도 + 재시작 시 재생성으로 대체 | `app/report.py` |
@@ -232,13 +266,16 @@ START → prepare(형식 검사·개인정보 마스킹) → approval: interrupt
 
 ---
 
-## 5. MCP: 직접 구축한 서버 2개 (stdio)
+## 5. MCP: 직접 구축한 서버 2개 (별도 프로세스, Streamable HTTP)
 
 | 서버 | 조회 도구 | 변경 도구 (destructiveHint) | Resource |
 |---|---|---|---|
-| **business-mcp** | `get_session_status`, `list_tasks`, `list_work_log`(업무 메모·지문), `list_observations` | `assign_tasks`, `update_task_status`, `save_observation` | — |
-| **rag-mcp** | `list_company_docs`, `search_company_docs`(벡터 검색, 실패 시 키워드), `read_company_doc` | `register_company_doc` (승인 토큰 없으면 거부) | `docs://{session_id}/{doc_id}` 원문, `scenario://brief` |
+| **business-mcp** :9101 | `get_session_status`, `list_tasks`, `list_work_log`(업무 메모·지문), `list_observations` | `assign_tasks`, `update_task_status`, `save_observation`, `post_message`, `update_session_state`, `claim_scene`, `claim_report`, `record_report_attempt`, `finish_report`, `save_doc_request`, `set_doc_request_status` | — |
+| **rag-mcp** :9102 | `list_company_docs`, `search_company_docs`(벡터 검색, 실패 시 키워드), `read_company_doc` | `register_company_doc` (승인 토큰 없으면 거부) | `docs://{session_id}/{doc_id}` 원문, `scenario://brief` |
 
+- **에이전트의 쓰기는 모두 business-mcp로**: 동료·팀장 발화 기록, 진행 단계·분업안, 후속 반응 1회 기록, 관찰·리포트 저장, 문서 등록 요청까지 에이전트(`graph`·`report`·`doc_graph`)는 DB에 직접 쓰지 않고 변경 도구를 부릅니다. 값 검사는 서버가 합니다(에이전트는 지원자 이름으로 메시지를 쓸 수 없음, 단계는 negotiate·work만, 분업 값 검사). `tests/test_architecture.py`가 에이전트 모듈에 직접 쓰기 코드가 없는지 검사합니다.
+- **별도 프로세스 + HTTP**: 서버를 따로 띄워 두고 주소로 연결합니다(`config [mcp]`). stdio처럼 호출마다 서버 프로세스를 띄우지 않아 같은 조회 5회가 **1.04초 → 0.05초**로 줄었습니다. 테스트만 stdio(테스트마다 임시 DB를 쓰므로)로 돌리고, 실제 stdio 연결 1회는 `test_architecture.py`가 확인합니다.
+- **왜 MCP인가**: 지금 규모(클라이언트 하나)에서는 함수 호출로도 됩니다. MCP로 둔 이유는 경계입니다. 회사 문서와 채용 건 데이터는 **기업이 소유할 수 있는 쪽**, 에이전트는 **우리가 소유하는 쪽**입니다. 기업이 같은 도구 규격으로 자기 문서 서버(rag-mcp)를 띄우거나, 채용 담당자가 다른 MCP 클라이언트(예: Claude Desktop)로 `list_observations`를 조회해도 에이전트 코드는 바뀌지 않습니다. 역할별로 볼 수 있는 정보를 거르는 것(동료는 대상 변경을 모름)은 서버 쪽 검사로 하지만, 이것 자체는 MCP가 아니어도 되는 일이라 MCP의 이유로 들지 않습니다.
 - **모델이 고르는 도구**: 동료·팀장은 회사 정보 질문에 문서 검색·읽기 도구를 스스로 골라 호출하고, 답에 문서 이름을 밝힙니다.
 - **모델이 속일 수 없는 인자**: 세션 시각·기업·세션 id는 모델이 아니라 코드가 넣습니다. 늦게 공개되는 문서(이 시나리오에는 없지만 장치는 남겨 둠)를 모델이 시각을 바꿔 미리 읽을 수 없습니다(F-15). Resource는 시각 인자가 없으므로 MCP 서버가 DB에서 세션 시각을 직접 읽어 판단합니다.
 - **벡터 검색**(`app/embedding.py`): 문서 → 문단 청크 → `text-embedding-3-small` 임베딩 → SQLite 색인(모델 이름·차원 기록) → 질문 임베딩과 코사인 유사도. 내용 해시가 같으면 다시 임베딩하지 않고, 기업이 등록·교체한 문서는 다음 검색 때 자동 색인. 임베딩 호출이 실패하면 키워드 검색으로 대신 찾고 결과에 `via`로 방식을 밝힙니다.
@@ -314,8 +351,9 @@ START → prepare(형식 검사·개인정보 마스킹) → approval: interrupt
 | 레퍼런스 | 이 MVP | 이유 |
 |---|---|---|
 | PostgreSQL + pgvector | SQLite | 설치 없이 바로 실행·테스트(테스트마다 임시 DB). 저장소 함수(`app/store.py`)만 바꾸면 이전 가능 |
-| MCP Streamable HTTP (별도 컨테이너) | MCP stdio (에이전트가 자식 프로세스로 실행) | 로컬 MVP에서 포트·컨테이너 없이 동작. 서버 코드는 `mcp.run(transport=...)`만 바꾸면 HTTP로 전환 |
-| business-mcp가 gateway 내부 API 경유 | 같은 SQLite 파일을 직접 읽음 | 프로세스 하나 줄여 단순화. 변경은 모두 MCP 도구를 거침 |
+| MCP Streamable HTTP (별도 컨테이너) | MCP Streamable HTTP (별도 프로세스, 컨테이너 없음). 테스트만 stdio | 로컬 실행을 단순하게 유지. 테스트는 테스트마다 임시 DB를 써서 서버도 그 DB를 보도록 자식 프로세스로 띄움 |
+| Spring Boot와 FastAPI Agent 분리 | FastAPI gateway(:8000)와 FastAPI 에이전트 서버(:8001) 분리, HTTP 호출 | 팀 전원이 파이썬이라 gateway도 FastAPI. 금지 사항(gateway의 LLM 호출, 에이전트의 DB 직접 쓰기)은 같게 지키고 테스트로 검사 |
+| business-mcp가 gateway 내부 API 경유 | 같은 SQLite 파일을 직접 읽고 씀 | 내부 API를 두면 도구마다 gateway 엔드포인트를 하나씩 더 만들어야 함(이번 범위 밖). 에이전트의 변경은 모두 business-mcp 도구를 거치고, 값 검사는 서버가 함 |
 | (PRD에 담당자 수 정의 없음) | 한 회사 한 관리자 계정. 같은 회사 이름(대소문자·공백 무시)으로는 가입 불가 | 기업을 회사 이름으로 구분하므로, 같은 이름 가입을 허용하면 남의 지원자·리포트가 보임(F-01). 담당자 여러 명은 PRD 범위 밖 |
 | 미리 색인한 Vector DB (BGE-M3 + pgvector) | 미리 색인한 임베딩(`text-embedding-3-small`) + SQLite + 코사인 유사도, 실패 시 키워드 | 팀 키로 쓸 수 있고 새 라이브러리·로컬 모델 다운로드가 필요 없음. 문서 수가 적어 별도 벡터 DB 없이 충분. 저장소만 pgvector로 바꾸면 이전 가능 |
 | 202 + SSE 진행 이벤트 | 화면이 2초마다 조회(poll) + 진행 이벤트 필드 | 장면을 정시에 실행하는 시계와 같은 조회로 처리해 스케줄러 불필요 |
@@ -324,7 +362,7 @@ START → prepare(형식 검사·개인정보 마스킹) → approval: interrupt
 | 관찰 지표는 규칙, LLM은 근거 정리만 (부록 A.4) | 의미 판단만 LLM 체크리스트 | 규칙만으로는 바꿔 말한 행동을 0/4 놓침(§7 평가). 재현성은 temperature 0 + 캐시 + 반복 평가로 보완 |
 | 점수·등급 없이 근거만 (PRD 5.5) | 역량별 참고 등급(A~E), 코드 규칙으로 계산 | 팀 결정으로 점수 표시는 팀마다 자율(2026-10-20). LLM이 등급을 매기면 같은 대화에도 등급이 바뀌고 근거를 설명하기 어려워, 검증된 근거 수로 코드가 계산. 동의 화면에서 등급 표시를 고지하고 최종 판단은 담당자 |
 
-**품질 특성(ISO/IEC 25010) 대응**: 신뢰성 — LLM 재시도·대체 대사·리포트 재생성·장면 중복 방지·임베딩 실패 시 키워드 검색 / 보안 — 비밀번호 해시, 서명 토큰, 기업별 데이터 분리, 승인 토큰, 개인정보 마스킹, `.env` 비공개 / 유지보수성 — 시나리오·숫자·프롬프트를 코드 밖 파일로 분리 / 시험성 — 테스트 110개, 평가셋(튜닝·홀드아웃·발화 검증·검색). 이식성 — 시나리오 팩 교체로 다른 회사 적용.
+**품질 특성(ISO/IEC 25010) 대응**: 신뢰성 — LLM 재시도·대체 대사·리포트 재생성·장면 중복 방지·임베딩 실패 시 키워드 검색 / 보안 — 비밀번호 해시, 서명 토큰, 기업별 데이터 분리, 승인 토큰, 개인정보 마스킹, `.env` 비공개 / 유지보수성 — 시나리오·숫자·프롬프트를 코드 밖 파일로 분리 / 시험성 — 테스트 156개(아키텍처 경계 포함), 평가셋(튜닝·홀드아웃·발화 검증·검색). 이식성 — 시나리오 팩 교체로 다른 회사 적용, MCP 서버 주소만 바꾸면 다른 문서 서버 연결. 성능 효율성 — MCP 상시 서버로 호출 비용 1.04초 → 0.05초(5회).
 
 ---
 

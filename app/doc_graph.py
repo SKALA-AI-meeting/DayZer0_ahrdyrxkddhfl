@@ -20,7 +20,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from app import approval, store
-from app.mcp_client import call_rag
+from app.mcp_client import call_business, call_rag
 
 log = logging.getLogger("dayzero.doc_graph")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
@@ -46,14 +46,15 @@ def mask(text: str) -> tuple[str, int]:
     return text, n1 + n2
 
 
-def prepare(state: DocState) -> DocState:
+async def prepare(state: DocState) -> DocState:
     if not DOC_ID.fullmatch(state["doc_id"]):
         raise ValueError("문서 id는 영문 소문자·숫자·-·_ 2~40자로 써 주세요.")
     if not state["title"].strip() or not state["body"].strip():
         raise ValueError("문서 제목과 본문을 입력해 주세요.")
     body, n = mask(state["body"])
-    store.save_doc_request(state["request_id"], state["company"], state["doc_id"],
-                           state["title"].strip(), body, n)
+    await call_business("save_doc_request", {
+        "request_id": state["request_id"], "company": state["company"], "doc_id": state["doc_id"],
+        "title": state["title"].strip(), "body": body, "masked_count": n})
     return {"body": body, "masked_count": n, "title": state["title"].strip()}
 
 
@@ -79,12 +80,12 @@ async def register(state: DocState) -> DocState:
     except RuntimeError as exc:   # 도구가 거부·실패하면 성공으로 기록하지 않는다(원인은 로그에)
         log.error("문서 등록 실패: request=%s %s", state["request_id"], exc)
         status = "failed"
-    store.set_doc_request_status(state["request_id"], status)
+    await call_business("set_doc_request_status", {"request_id": state["request_id"], "status": status})
     return {"result": status}
 
 
-def reject(state: DocState) -> DocState:
-    store.set_doc_request_status(state["request_id"], "rejected")
+async def reject(state: DocState) -> DocState:
+    await call_business("set_doc_request_status", {"request_id": state["request_id"], "status": "rejected"})
     return {"result": "rejected"}
 
 

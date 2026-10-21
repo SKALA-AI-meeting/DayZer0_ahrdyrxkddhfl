@@ -7,6 +7,7 @@
 장면 구조·관찰 요소는 같아서, 에이전트 코드는 그대로 두고 데이터만 갈아끼운다.
 """
 import os
+import random
 import tomllib
 from functools import lru_cache
 from pathlib import Path
@@ -40,6 +41,17 @@ def default_pack() -> str:
 
 def pack_ids() -> list[str]:
     return [p["id"] for p in _packs_file()["pack"]]
+
+
+RANDOM_PACK = "random"   # 기업이 고를 수 있는 특수 값: 지원자(초대)마다 팩을 무작위로 고른다
+
+
+def pick_pack(choice: str) -> str:
+    """기업이 정한 시나리오로 이번 지원자의 팩을 정한다. RANDOM_PACK이면 등록된 팩 중 하나를 무작위로 고른다.
+
+    고른 실제 팩 id가 세션에 저장되므로 그 뒤 화면·관찰·리포트는 모두 그 팩을 따른다.
+    """
+    return random.choice(pack_ids()) if choice == RANDOM_PACK else choice
 
 
 def _dir(pack: str | None) -> Path:

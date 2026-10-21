@@ -92,7 +92,9 @@ export default function AdminHome() {
           {mine && (
             <div className="notice small" style={{ marginBottom: 12 }}>
               업무 시나리오: <b>{mine.current.company} · {mine.current.task_title}</b>
-              <span className="muted"> — 가입할 때 정한 시나리오예요. 모든 지원자가 같은 조건에서 평가받도록 바꿀 수 없어요.</span>
+              <span className="muted">{mine.current.id === "random"
+                ? " — 가입할 때 정한 방식이에요. 지원자마다 받은 시나리오는 아래 지원자 목록에 보여요(체크 항목은 모두 같아요)."
+                : " — 가입할 때 정한 시나리오예요. 모든 지원자가 같은 조건에서 평가받도록 바꿀 수 없어요."}</span>
             </div>
           )}
           <div className="row">

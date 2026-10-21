@@ -12,11 +12,13 @@ verify가 검사하는 것 (모두 코드, LLM 아님):
 - 하지 않은 일 지어내기: 업무를 거의 못 한 동료가 "정리해봤어요"처럼 결과물을 만든 것처럼 말함
 - 말만 하고 실행 안 함: "확인해 볼게요"라고 하면서 이번 답에서 도구를 한 번도 부르지 않음
 - 판정 발언(F-24): 합격·평가 결과·연출 같은 금지 표현
+- 칭찬·평가: "~한 점은 좋습니다"처럼 지원자의 행동·보고를 평가하는 말(끝내 나오면 그 문장만 뺌)
 - 필수 내용(F-23): 장면 대사에 전달해야 할 사실(events.toml must_include)이 빠졌는지
 - 출처(F-22): 답에 밝힌 회사 문서가 실제로 이번에 도구로 읽은 문서인지
 """
 import asyncio
 import json
+import re
 from typing import TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -140,6 +142,9 @@ def check(text: str, must_include: list[list[str]], read_titles: list[str], use_
         return "judgement"
     if unshared and any(p in text for p in config()["verify"]["unshared_claim_phrases"]):
         return "unshared_claim"   # 하지 않은 업무 결과를 이미 만든 것처럼 말함
+    praise = next((p for p in config()["verify"]["praise_phrases"] if p in text), None)
+    if praise:
+        return f"praise:{praise}"   # 지원자의 행동·보고를 칭찬·평가함
     for options in must_include:
         if not any(o in text for o in options):
             return f"missing:{options[0]}"
@@ -184,6 +189,8 @@ def after_verify(state: SpeakState) -> str:
 FEEDBACK = {
     "judgement": "방금 답에 평가·합격·연출에 관한 표현이 있었다. 그런 표현 없이 업무 이야기만 다시 써라.",
     "missing": "방금 답에 반드시 전달해야 할 내용 '{x}'이(가) 빠졌다. 빠짐없이 넣어 다시 써라.",
+    "praise": "방금 답에 지원자의 행동이나 보고를 칭찬·평가하는 표현('{x}')이 있었다. "
+              "평가하는 말은 빼고, 확인했다는 말과 필요한 질문만 남겨 다시 써라.",
     "unshared_claim": "너는 맡은 업무의 결과물이 없다. 결과물을 이미 만든 것처럼 말하거나 내용을 지어내지 마라. "
                       "업무 이야기는 하고 있는 일이나 사정만 말하라.",
     "no_lookup": "찾아보지 않고 답할 수 없다고 했다. 회사 문서를 먼저 검색해 보고, 찾은 내용으로 답하라. "
@@ -215,10 +222,25 @@ def done_node(state: SpeakState) -> SpeakState:
     return {"text": state["text"].strip()}
 
 
+def drop_praise(text: str) -> str:
+    """칭찬 표현이 든 문장만 뺀다. 남는 문장이 없으면 빈 문자열."""
+    phrases = config()["verify"]["praise_phrases"]
+    kept = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if not any(p in s for p in phrases)]
+    return " ".join(kept)
+
+
 def fallback_node(state: SpeakState) -> SpeakState:
-    """끝내 검증을 통과하지 못하면 사실을 지어내지 않는 대체 문장을 쓴다."""
+    """끝내 검증을 통과하지 못하면 사실을 지어내지 않는 대체 문장을 쓴다.
+
+    칭찬만 걸린 답은 나머지 내용이 맞으므로 칭찬 문장만 빼고 내보낸다(보고 답에 엉뚱한 대체 문장이 나가지 않게).
+    """
     progress.clear(state.get("session_id", ""), state.get("node", ""))
-    text = guard.notice() if state["verdict"] == "judgement" else state["fallback"]
+    if state["verdict"] == "judgement":
+        text = guard.notice()
+    elif state["verdict"].startswith("praise:"):
+        text = drop_praise(state.get("text", "")) or state["fallback"]
+    else:
+        text = state["fallback"]
     return {"text": text}
 
 

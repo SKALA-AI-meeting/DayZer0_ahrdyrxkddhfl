@@ -261,7 +261,8 @@ async def generate_with_retry(session_id: str) -> str:
     Returns:
         최종 리포트 상태 (ready | failed | skipped).
     """
-    if not store.claim_report(session_id):
+    claimed = json.loads(await call_business("claim_report", {"session_id": session_id}))["claimed"]
+    if not claimed:
         return "skipped"
     return await _run(session_id)
 
@@ -289,12 +290,13 @@ async def _run(session_id: str) -> str:
             body = await generate(session_id)
         except Exception as exc:   # 실패 원인을 남기고 재시도(F-34)
             log.exception("리포트 생성 실패 %s/%s: session=%s", attempt, attempts, session_id)
-            store.update_report(session_id, attempts=attempt,
-                                error=f"{type(exc).__name__}: {exc} | {llm.trace_hint(session_id)}")
+            await call_business("record_report_attempt", {
+                "session_id": session_id, "attempt": attempt,
+                "error": f"{type(exc).__name__}: {exc} | {llm.trace_hint(session_id)}"})
             continue
-        store.update_report(session_id, state="ready", attempts=attempt, body=body, error=None)
-        store.update_session(session_id, status="report_ready")
+        # 저장은 business-mcp 변경 도구로(에이전트는 DB에 직접 쓰지 않는다, tests/test_architecture.py)
+        await call_business("finish_report", {"session_id": session_id, "state": "ready", "attempts": attempt,
+                                              "body_json": json.dumps(body, ensure_ascii=False)})
         return "ready"
-    store.update_report(session_id, state="failed")
-    store.update_session(session_id, status="failed")
+    await call_business("finish_report", {"session_id": session_id, "state": "failed"})
     return "failed"

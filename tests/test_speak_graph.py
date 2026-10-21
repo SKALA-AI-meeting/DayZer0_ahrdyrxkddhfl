@@ -96,3 +96,17 @@ def test_stale_doc_is_rejected_after_release(late_interviews):
     assert sg.check(say, [], [], False, minute=55) == "ok"                              # 공개 전에는 정상
     assert sg.check(say, [], [], False, minute=67) == "stale_doc:사용자 인터뷰 요약"
     assert sg.check("완성되면 정리해서 드릴게요", [], [], False, minute=67) == "ok"
+
+
+def test_praise_is_caught():
+    text = "알겠습니다. 진행 상황 확인했습니다. 예산안 초안이 잡힌 점은 좋습니다."
+    assert sg.check(text, [], [], False) == "praise:점은 좋"
+    assert sg.check("알겠어요, 확인했어요. 범위를 줄이는 건 좋습니다.", [], [], False) == "ok"   # 제안 수락은 정상
+
+
+def test_fallback_drops_only_praise_sentences():
+    text = "알겠습니다. 예산안 초안이 잡힌 점은 좋습니다. 박준서님 쪽은 어떻게 됐나요?"
+    out = sg.fallback_node({"verdict": "praise:점은 좋", "fallback": "대체", "text": text})
+    assert out["text"] == "알겠습니다. 박준서님 쪽은 어떻게 됐나요?"
+    out = sg.fallback_node({"verdict": "praise:잘하셨", "fallback": "대체", "text": "잘하셨어요!"})
+    assert out["text"] == "대체"   # 칭찬뿐이면 대체 문장

@@ -69,7 +69,8 @@ def test_work_step_records_memo_narration_and_moves_clock(monkeypatch):
     async def fake_business(tool, args):
         store.set_task_status(args["session_id"], args["part"], args["status"])
         return "ok"
-    monkeypatch.setattr(work, "classify", fake_classify)
+    from app import memo_agent
+    monkeypatch.setattr(memo_agent, "classify", fake_classify)
     monkeypatch.setattr(engine, "call_business", fake_business)
     a = _signup()
     token = client.post("/api/admin/invites", json={"alias": "x"}, headers=a).json()["invite_path"].rsplit("/", 1)[1]
@@ -139,3 +140,30 @@ def test_same_company_name_cannot_sign_up_again():
     assert "이미 가입한 이메일" in r.json()["detail"]
     assert c.post("/api/auth/signup", json={"email": "b@other.kr", "password": "password123",
                                             "company": "다른 회사"}).status_code == 200
+
+
+def test_random_scenario_assigns_pack_per_invite(monkeypatch):
+    """랜덤을 고른 회사는 초대마다 팩을 고르고, 세션에는 실제 팩 id가 저장된다."""
+    import random
+    from app import settings
+    assert settings.RANDOM_PACK in [s["id"] for s in client.get("/api/scenarios").json()]
+    r = client.post("/api/auth/signup", json={"email": "hr@rand.kr", "password": "password123",
+                                               "company": "랜덤사", "scenario": settings.RANDOM_PACK})
+    a = {"Authorization": f"Bearer {r.json()['token']}"}
+    assert client.get("/api/admin/scenario", headers=a).json()["current"]["id"] == settings.RANDOM_PACK
+    picks = iter(settings.pack_ids())
+    monkeypatch.setattr(random, "choice", lambda seq: next(picks))   # 팩을 차례로 고르게 고정
+    sids = [client.post("/api/admin/invites", json={"alias": f"x{i}"}, headers=a).json()["session_id"]
+            for i in range(len(settings.pack_ids()))]
+    assert [store.get_session(s)["scenario"] for s in sids] == settings.pack_ids()
+    titles = [d["title"] for d in client.get("/api/admin/docs", headers=a).json()["docs"]]
+    assert len(titles) == sum(len(settings.docs_index(p)) for p in settings.pack_ids())
+
+
+def test_fixed_scenario_is_same_for_every_invite():
+    a = _signup("hr@fixed.kr", "고정사")
+    sids = [client.post("/api/admin/invites", json={"alias": f"x{i}"}, headers=a).json()["session_id"]
+            for i in range(3)]
+    assert {store.get_session(s)["scenario"] for s in sids} == {"moarun"}
+    assert client.post("/api/auth/signup", json={"email": "z@z.kr", "password": "password123",
+                                                  "company": "Z사", "scenario": "없는팩"}).status_code == 400

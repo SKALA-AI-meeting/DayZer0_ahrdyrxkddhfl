@@ -90,7 +90,8 @@ def test_work_step_classify_failure_falls_back_to_other(monkeypatch, turns):
 
     async def broken(*_a, **_k):
         raise RuntimeError("LLM 장애")
-    monkeypatch.setattr(work.llm, "ainvoke", broken)
+    from app import memo_agent
+    monkeypatch.setattr(memo_agent.llm, "ainvoke", broken)
     sid = _session(3)
     store.update_session(sid, status="in_progress", last_seen=1000.0)
     asyncio.run(engine.work_step(sid, "음 일단 해볼게요", now=1000.0))
@@ -156,7 +157,8 @@ def test_work_step_advances_one_part_and_updates_card(monkeypatch, turns):
     async def fake_business(tool, args):
         calls.append((tool, args["part"], args["status"]))
         return "ok"
-    monkeypatch.setattr(work, "classify", fake_classify)
+    from app import memo_agent
+    monkeypatch.setattr(memo_agent, "classify", fake_classify)
     monkeypatch.setattr(engine, "call_business", fake_business)
     sid = _session(3)
     store.update_session(sid, status="in_progress", last_seen=1000.0)

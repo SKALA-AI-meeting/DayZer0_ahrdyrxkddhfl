@@ -15,6 +15,7 @@
 
 분업 조정은 최대 config [negotiation].max_rounds회(F-21). 장면 실행 시점은 engine이 시계로 정한다.
 """
+import json
 import logging
 from typing import Literal, TypedDict
 
@@ -65,8 +66,21 @@ async def _mark_coworker_cards(session_id: str, assignment: dict[str, str], stat
                                 {"session_id": session_id, "part": part, "status": status})
 
 
-def _post(state: TurnState, channel: str, sender: str, text: str) -> None:
-    store.add_message(state["session_id"], channel, sender, text, state["minute"])
+# 에이전트는 DB에 직접 쓰지 않고 business-mcp 변경 도구로만 쓴다(레퍼런스 금지 사항, tests/test_architecture.py).
+async def _post(state: TurnState, channel: str, sender: str, text: str) -> None:
+    await call_business("post_message", {"session_id": state["session_id"], "channel": channel,
+                                         "sender": sender, "text": text, "minute": state["minute"]})
+
+
+async def _update_session(session_id: str, **fields) -> None:
+    """세션 진행 단계·분업안·조정 횟수를 business-mcp로 바꾼다."""
+    await call_business("update_session_state", {"session_id": session_id, **fields})
+
+
+async def _claim(session_id: str, key: str, minute: float) -> bool:
+    """후속 반응 실행 권한(처음 부른 쪽만 True)을 business-mcp로 얻는다."""
+    out = await call_business("claim_scene", {"session_id": session_id, "scene_key": key, "minute": minute})
+    return json.loads(out)["claimed"]
 
 
 def _already_said(session_id: str, scene: dict) -> bool:
@@ -89,7 +103,7 @@ async def run_scene(state: TurnState) -> TurnState:
     sid, update = state["session_id"], {}
     if scene["speaker"] in ("system", "narrator"):   # 알림·업무 지문은 정해진 문장 그대로(진척 요약은 코드가 채움)
         text = scene["message"].replace("{progress_summary}", work.summary(sid, state["scenario"]))
-        _post(state, scene["channel"], scene["speaker"], text)
+        await _post(state, scene["channel"], scene["speaker"], text)
         return update
     task = scene_task(scene)
     if scene["id"] == "negotiate":
@@ -106,9 +120,9 @@ async def run_scene(state: TurnState) -> TurnState:
         log.exception("장면 대사 생성 실패, 대체 대사 사용: session=%s scene=%s", sid, scene["id"])
         llm.trace({"session": sid, "node": "graph.run_scene", "fallback": scene["id"]})
         text = fallback
-    _post(state, scene["channel"], scene["speaker"], text)
+    await _post(state, scene["channel"], scene["speaker"], text)
     if update:
-        store.update_session(sid, **update)
+        await _update_session(sid, **update)
     return update
 
 
@@ -137,12 +151,12 @@ async def counter_proposal(state: TurnState) -> TurnState:
     """지원자 요청을 반영한 새 분담안을 동료가 다시 제안한다 (조정 1회)."""
     assignment = {**state["assignment"], **state["requested"]}
     rounds = state["negotiation_round"] + 1
-    store.update_session(state["session_id"], assignment=assignment, negotiation_round=rounds)
+    await _update_session(state["session_id"], assignment=assignment, negotiation_round=rounds)
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"지원자의 요청을 반영한 분담안을 다시 제안하고 이대로 괜찮은지 물어라: "
         f"{persona.assignment_text(assignment, state['scenario'])}", use_tools=False)
-    _post(state, "dm", "coworker", text)
+    await _post(state, "dm", "coworker", text)
     return {"assignment": assignment, "negotiation_round": rounds}
 
 
@@ -152,14 +166,14 @@ async def apply_assignment(state: TurnState) -> TurnState:
     rounds = state["negotiation_round"] + (0 if state["agreed"] else 1)
     await call_business("assign_tasks", {"session_id": state["session_id"], "assignment": assignment})
     await _mark_coworker_cards(state["session_id"], assignment, "doing")
-    store.update_session(state["session_id"], assignment=assignment, negotiation_round=rounds,
-                         phase="work")
+    await _update_session(state["session_id"], assignment=assignment, negotiation_round=rounds,
+                          phase="work")
     note = "" if state["agreed"] else " (조정 횟수 한도에 닿아 마지막 안으로 진행한다고 부드럽게 알려라)"
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"분담을 확정했다고 짧게 알리고 태스크 보드에 반영했다고 말하라: "
         f"{persona.assignment_text(assignment, state['scenario'])}{note}", use_tools=False)
-    _post(state, "dm", "coworker", text)
+    await _post(state, "dm", "coworker", text)
     return {"assignment": assignment, "phase": "work", "negotiation_round": rounds}
 
 
@@ -183,15 +197,15 @@ async def reply(state: TurnState) -> TurnState:
     role = persona.responder(channel, state["trigger"]["text"], state["scenario"])
     task = "방금 지원자가 보낸 메시지에 답하라."
     follow = pending_follow_up(sid, role, channel, state["scenario"])
-    if follow and store.claim_scene(sid, f"{FOLLOW_UP_PREFIX}{follow['id']}", state["minute"]):
+    if follow and await _claim(sid, f"{FOLLOW_UP_PREFIX}{follow['id']}", state["minute"]):
         # 후속 반응은 장면마다 한 번만(지원자마다 같은 조건). 그 전 장면들의 반응도 지나간 것으로 표시한다.
         for s in scenes(state["scenario"]):
             if s.get("follow_up") and s["speaker"] == role and s["channel"] == channel:
-                store.claim_scene(sid, f"{FOLLOW_UP_PREFIX}{s['id']}", state["minute"])
+                await _claim(sid, f"{FOLLOW_UP_PREFIX}{s['id']}", state["minute"])
         task += f" 이때 다음 반응을 한 번 담아라: {follow['follow_up']}"
         llm.trace({"session": sid, "node": "graph.follow_up", "scene": follow["id"]})
     text = await persona.speak(role, sid, state["minute"], task)
-    _post(state, channel, role, text)
+    await _post(state, channel, role, text)
     return {}
 
 
@@ -204,13 +218,13 @@ async def finalize_split(state: TurnState) -> TurnState:
     assignment = state["assignment"]
     await call_business("assign_tasks", {"session_id": state["session_id"], "assignment": assignment})
     await _mark_coworker_cards(state["session_id"], assignment, "doing")
-    store.update_session(state["session_id"], phase="work")
+    await _update_session(state["session_id"], phase="work")
     text = await persona.speak(
         "coworker", state["session_id"], state["minute"],
         f"분담 얘기가 아직 안 끝났지만 시간이 됐으니 일단 지금 안으로 진행하자고 부드럽게 알리고, "
         f"태스크 보드에 반영했다고 말하라: {persona.assignment_text(assignment, state['scenario'])}",
         use_tools=False)
-    _post(state, "dm", "coworker", text)
+    await _post(state, "dm", "coworker", text)
     return {"phase": "work"}
 
 

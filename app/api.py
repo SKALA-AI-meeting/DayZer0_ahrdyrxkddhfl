@@ -12,14 +12,14 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from app import auth, clock, doc_graph, engine, progress, report, settings, store, work
+from app import agent_client, auth, clock, engine, settings, store, work
 from app import docs as docs_module
 from app import mcp_client
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # 재시작 전 "생성 중"이던 리포트를 백그라운드로 다시 만든다(F-34)
-    task = asyncio.create_task(report.resume_stale())
+    task = asyncio.create_task(agent_client.resume_reports())
     yield
     task.cancel()
 
@@ -110,23 +110,28 @@ def create_invite(body: InviteIn, admin: dict = Depends(_admin)) -> dict:
         raise HTTPException(400, str(exc)) from exc
 
 
+_PUBLIC_KEYS = ("id", "company", "company_desc", "service", "service_desc", "task_title",
+                "lead_name", "lead_short", "lead_role", "coworker_name", "coworker_short", "coworker_role")
+
+
 def _pack_public(pack: str) -> dict:
-    """화면에 보여줄 시나리오 팩 정보(회사·서비스·등장인물)."""
+    """화면에 보여줄 시나리오 팩 정보(회사·서비스·등장인물). RANDOM_PACK은 실제 팩이 아니라 안내 문구만."""
+    if pack == settings.RANDOM_PACK:
+        return {**{k: "" for k in _PUBLIC_KEYS}, "id": pack, "company": "지원자마다 랜덤",
+                "task_title": f"등록된 시나리오 {len(settings.pack_ids())}개 중 하나를 지원자마다 무작위로 배정"}
     info = settings.pack_info(pack)
-    keys = ("id", "company", "company_desc", "service", "service_desc", "task_title",
-            "lead_name", "lead_short", "lead_role", "coworker_name", "coworker_short", "coworker_role")
-    return {k: info[k] for k in keys}
+    return {k: info[k] for k in _PUBLIC_KEYS}
 
 
 @app.get("/api/scenarios")
 def scenarios() -> list[dict]:
-    """가입 화면에서 고를 시나리오 팩 목록. 첫 번째가 기본(공통 PRD). 가상 회사 정보뿐이라 로그인 없이 보인다."""
-    return [_pack_public(p) for p in settings.pack_ids()]
+    """가입 화면에서 고를 시나리오 목록(팩들 + 지원자마다 랜덤). 첫 번째가 기본. 가상 회사 정보뿐이라 로그인 없이 보인다."""
+    return [_pack_public(p) for p in [*settings.pack_ids(), settings.RANDOM_PACK]]
 
 
 @app.get("/api/admin/scenario")
 def company_scenario(admin: dict = Depends(_admin)) -> dict:
-    """이 기업의 시나리오(가입할 때 정해지고 바뀌지 않는다. PRD 5.5 같은 조건)."""
+    """이 기업의 시나리오(가입할 때 정해지고 바뀌지 않는다). 랜덤이면 지원자별 팩은 지원자 목록에 보인다."""
     return {"current": _pack_public(store.company_scenario(admin["company"]))}
 
 
@@ -230,7 +235,7 @@ async def poll(token: str, after: int = 0) -> dict:
         "part_titles": settings.part_titles(s["scenario"]),
         "names": settings.names(s["scenario"]),
         "pack": _pack_public(s["scenario"]),
-        "activity": progress.get(s["id"]),   # 진행 이벤트: AI가 지금 하는 일
+        "activity": await agent_client.activity(s["id"]),   # 진행 이벤트: AI가 지금 하는 일
         "poll_interval_seconds": settings.config()["session"]["poll_interval_seconds"],
         "time_scale": settings.config()["session"]["time_scale"],
     }
@@ -321,14 +326,19 @@ class DecisionIn(BaseModel):
 @app.get("/api/admin/docs")
 def list_docs(admin: dict = Depends(_admin)) -> dict:
     """현재 문서 목록(시나리오 + 승인된 기업 문서)과 등록 요청 목록."""
-    return {"docs": docs_module.all_docs(admin["company"], store.company_scenario(admin["company"])),
-            "requests": store.doc_requests(admin["company"])}
+    choice = store.company_scenario(admin["company"])
+    if choice == settings.RANDOM_PACK:   # 랜덤이면 모든 팩의 문서를 팩 회사 이름을 붙여 보여 준다
+        docs = [{**d, "title": f"[{settings.pack_info(p)['company']}] {d['title']}"}
+                for p in settings.pack_ids() for d in docs_module.all_docs(admin["company"], p)]
+    else:
+        docs = docs_module.all_docs(admin["company"], choice)
+    return {"docs": docs, "requests": store.doc_requests(admin["company"])}
 
 
 @app.post("/api/admin/docs")
 async def request_doc(body: DocIn, admin: dict = Depends(_admin)) -> dict:
     try:
-        return await doc_graph.request(admin["company"], body.doc_id.strip(), body.title, body.body)
+        return await agent_client.request_doc(admin["company"], body.doc_id.strip(), body.title, body.body)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -336,7 +346,7 @@ async def request_doc(body: DocIn, admin: dict = Depends(_admin)) -> dict:
 @app.post("/api/admin/docs/{request_id}/decision")
 async def decide_doc(request_id: str, body: DecisionIn, admin: dict = Depends(_admin)) -> dict:
     try:
-        return {"result": await doc_graph.decide(request_id, admin["company"], body.approved)}
+        return {"result": await agent_client.decide_doc(request_id, admin["company"], body.approved)}
     except KeyError as exc:
         raise HTTPException(404, "없는 요청입니다.") from exc
     except RuntimeError as exc:

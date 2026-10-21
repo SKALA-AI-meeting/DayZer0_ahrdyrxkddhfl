@@ -2,6 +2,7 @@
 import asyncio
 
 from app import graph, persona, store
+from conftest import inprocess_business
 
 
 def _fake(monkeypatch, seen=None):
@@ -11,9 +12,7 @@ def _fake(monkeypatch, seen=None):
         return f"{role}:{task[:10]}"
 
     async def fake_business(tool, args):
-        if tool == "assign_tasks":
-            store.set_task_owners(args["session_id"], args["assignment"])
-        return "ok"
+        return await inprocess_business(tool, args)
     monkeypatch.setattr(persona, "speak", fake_speak)
     monkeypatch.setattr(graph, "call_business", fake_business)
 
@@ -37,11 +36,7 @@ def test_coworker_cards_doing_after_split(monkeypatch):
         return "msg"
 
     async def fake_business(tool, args):
-        if tool == "assign_tasks":
-            store.set_task_owners(args["session_id"], args["assignment"])
-        if tool == "update_task_status":
-            store.set_task_status(args["session_id"], args["part"], args["status"])
-        return "ok"
+        return await inprocess_business(tool, args)
     monkeypatch.setattr(persona, "speak", fake_speak)
     monkeypatch.setattr(graph, "call_business", fake_business)
     sid = store.create_session("x")

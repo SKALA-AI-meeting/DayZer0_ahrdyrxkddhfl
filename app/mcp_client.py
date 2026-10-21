@@ -1,4 +1,4 @@
-"""직접 만든 MCP 서버 2개(stdio)에 연결한다.
+"""직접 만든 MCP 서버 2개에 연결한다(config [mcp].transport: http = 따로 떠 있는 서버, stdio = 자식 프로세스).
 
 모델에게 주는 문서 도구는 session_minute 인자를 숨긴 래퍼다. 시각은 코드가 넣으므로
 모델이 시각을 바꿔 아직 공개되지 않은 문서를 읽을 수 없다(F-15).
@@ -13,10 +13,21 @@ from pydantic import AnyUrl
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 
-from app.settings import ROOT
+from app.settings import ROOT, config
 
 
 def _client() -> MultiServerMCPClient:
+    """config [mcp].transport에 따라 MCP 서버 2개에 붙는 클라이언트를 만든다.
+
+    http: 따로 떠 있는 서버(Streamable HTTP)에 주소로 연결한다(레퍼런스 아키텍처).
+    stdio: 서버를 자식 프로세스로 띄운다(테스트용).
+    """
+    cfg = config()["mcp"]
+    if cfg["transport"] == "http":
+        def conn(name: str) -> dict:
+            return {"transport": "streamable_http",
+                    "url": f"http://{cfg['host']}:{cfg[f'{name}_port']}/mcp"}
+        return MultiServerMCPClient({"rag": conn("rag"), "business": conn("business")})
     # stdio 자식 프로세스는 환경변수를 일부만 물려받으므로 필요한 것만 명시해서 넘긴다.
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "DAYZERO_DB", "TMPDIR")}
     def conn(module: str) -> dict:

@@ -80,7 +80,8 @@ def test_stale_generating_report_is_retried(monkeypatch):
 def test_reply_failure_posts_fixed_message(monkeypatch):
     async def broken(*_a, **_k):
         raise RuntimeError("LLM 장애")
-    monkeypatch.setattr(engine.graph, "run_turn", broken)
+    from app import graph
+    monkeypatch.setattr(graph, "run_turn", broken)
     sid = store.create_session("x")
     store.update_session(sid, phase="work")
     asyncio.run(engine.send_message(sid, "dm", "1번 어디까지 쓰셨어요?", now=1000.0))
