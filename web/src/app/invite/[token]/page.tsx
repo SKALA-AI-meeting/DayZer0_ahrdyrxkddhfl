@@ -97,7 +97,7 @@ export default function InvitePage() {
             <div className="row"><span className="avatar lead">{info.pack.lead_short}</span><div><b>{info.pack.lead_name} 팀장</b><div className="muted small">{info.pack.lead_role}(AI). 팀 채널에서 미션을 주고, 1:1로 상담과 보고를 받아요.</div></div></div>
             <div className="row"><span className="avatar coworker">{info.pack.coworker_short}</span><div><b>{info.pack.coworker_name}</b><div className="muted small">{info.pack.coworker_role}(AI 동료). 1:1 메신저로 함께 일해요.</div></div></div>
           </div>
-          <p className="notice small">업무 내용은 직접 하지 않아요. "작업 계속하기"에 어떤 업무를 할지 적으면 그 업무가 한 칸 오르고 시간이 몇 분 지나요(한 번에 한 업무, 대화로는 진행되지 않음). 시작하면 {info.duration_minutes}분 타이머가 흐르고, 창을 닫으면 멈췄다가 같은 링크로 다시 들어오면 이어집니다.</p>
+          <p className="notice small">업무 내용은 직접 하지 않아요. 업무 카드에서 "이 업무 하기"를 누르면 그 업무가 한 칸 오르고 시간이 몇 분 지나요(한 번에 한 업무, 대화로는 진행되지 않음). 시작하면 {info.duration_minutes}분 타이머가 흐르고, 창을 닫으면 멈췄다가 같은 링크로 다시 들어오면 이어집니다.</p>
           <button onClick={start} style={{ width: "100%", marginTop: 8 }}>시작하기</button>
         </div>
       </Shell>
@@ -111,7 +111,7 @@ export default function InvitePage() {
         <h2 style={{ marginTop: 16 }}>시작 전 안내</h2>
         <ul>
           <li><b>평가 형식</b>: 가상 회사에서 AI 동료와 함께 프로젝트 하나를 맡아 진행합니다. 업무 실력이 아니라 함께 일하는 방식을 보므로, 업무 내용은 직접 하지 않고 대화와 짧은 업무 메모로 진행됩니다.</li>
-          <li><b>업무 진행 방식</b>: 업무마다 필요한 칸이 있어요. "작업 계속하기"에 어떤 업무를 할지 적으면 그 업무 하나가 한 칸 오르고 시간이 몇 분 지나요. 대화만으로는 업무가 진행되지 않아요. "업무 마치기"는 팀장님이 보고를 요청한 뒤에 누를 수 있어요.</li>
+          <li><b>업무 진행 방식</b>: 업무마다 필요한 칸이 있어요. 업무 카드에서 "이 업무 하기"를 누르면 그 업무 하나가 한 칸 오르고 시간이 몇 분 지나요. 대화만으로는 업무가 진행되지 않아요. "업무 마치기"는 팀장님이 보고를 요청한 뒤에 누를 수 있어요.</li>
           <li><b>관찰 항목</b>: 책임감·성실성, 계획성·꼼꼼함, 적응성·유연성, 협업·조율, 정직·공정한 보고.</li>
           <li><b>기록 방식</b>: 메시지와 보낸 시점, 분업 결정, 업무 메모가 기록됩니다.</li>
           <li><b>AI 사용</b>: 동료와 팀장은 AI입니다. 대화 중에 몇 가지 상황이 일어날 수 있고, 끝난 뒤 무엇이 연출된 상황이었는지 알려 드립니다.</li>

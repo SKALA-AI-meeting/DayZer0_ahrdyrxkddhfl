@@ -1,6 +1,6 @@
 "use client";
-// 가상 오피스: 메신저(팀 채널 · 동료 1:1 · 팀장 1:1) · 업무(업무 목록 · 업무 기록 · 작업 계속하기) · 회사 문서 · 남은 시간
-// 업무는 직접 하지 않는다: 다음 몇 분 동안 할 일을 짧게 적으면 정해진 지문이 이어지고 시간이 넘어간다(능력이 아니라 태도를 봄).
+// 가상 오피스(업무 보드 중심): 가운데 업무 카드 5장 · 업무 기록 · 회사 문서, 오른쪽 메신저(팀 채널 · 동료 1:1 · 팀장 1:1)
+// 업무는 직접 하지 않는다: 카드에서 업무 번호를 고르면 정해진 지문이 이어지고 시간이 넘어간다(능력이 아니라 태도를 봄).
 // 서버에 poll_interval_seconds마다 /poll을 불러 새 메시지와 상태를 받는다.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Msg } from "@/lib/api";
@@ -10,7 +10,7 @@ type Poll = {
   minute: number; remaining: number; status: string; time: string; phase: string;
   messages: Msg[]; tasks: Task[]; docs: { id: string; title: string }[];
   progress: Record<string, { done: number; units: number; visible: boolean }>; can_finish: boolean;
-  work_intro: string; memo_max_chars: number;
+  work_intro: string;
   poll_interval_seconds: number; time_scale: number;
   activity: { actor: string; label: string; node: string }[];
   names: Record<string, string>;
@@ -34,7 +34,6 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
   const [tab, setTab] = useState<Tab>("team");
   const [seen, setSeen] = useState<Record<Tab, number>>({ team: 0, dm: 0, lead_dm: 0 });  // 탭별 마지막으로 본 메시지 id
   const [draft, setDraft] = useState("");
-  const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState(false);
   const [working, setWorking] = useState(false);
   const [doc, setDoc] = useState<{ title: string; body: string } | null>(null);
@@ -97,12 +96,11 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
     setBusy(false);
   }
 
-  async function work() {
-    if (!memo.trim()) return;
+  // 업무는 글로 쓰지 않고 번호만 고른다(글솜씨가 평가에 섞이지 않게)
+  async function work(part: string) {
     setWorking(true);
     try {
-      await api(`/invite/${token}/work`, { method: "POST", body: JSON.stringify({ text: memo }) });
-      setMemo("");
+      await api(`/invite/${token}/work`, { method: "POST", body: JSON.stringify({ part }) });
       await poll();
     } catch (e) { setError((e as Error).message); }
     setWorking(false);
@@ -134,16 +132,72 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
 
   return (
     <div className="office">
-      <div className="topbar">
+      <header className="topbar">
         <span className="row"><span className="logo">Day <span>Zer0</span></span>
-          <span className="muted">{state.pack.company} · {state.pack.task_title}</span></span>
+          <span className="muted">{state.pack.company}</span></span>
         <span className="row">남은 시간 <span className={`timer ${(shown ?? state.remaining) < 5 ? "low" : ""}`}>{mmss(shown ?? state.remaining)}</span></span>
         <button onClick={submit} disabled={!state.can_finish}
           title={state.can_finish ? "" : "팀장님이 보고를 요청한 뒤에 마칠 수 있어요"}>업무 마치기</button>
-      </div>
+      </header>
+
+      {/* 업무 보드: 업무 카드에서 번호를 골라 진행 · 업무 기록 · 회사 문서 */}
+      <main className="workspace">
+        <div className="ws-head">
+          <h1>{state.pack.task_title}</h1>
+          <p className="muted">{state.work_intro}</p>
+        </div>
+
+        <div className="board">
+          {state.tasks.map((t) => {
+            const p = state.progress[t.part];
+            const done = !!p && p.visible && p.done >= p.units;
+            return (
+              <article key={t.part} className={`tcard ${t.owner}`}>
+                <div className="tcard-top">
+                  <span className="tnum">{t.part.padStart(2, "0")}</span>
+                  <span className={`owner ${t.owner}`}>{N[t.owner]}</span>
+                </div>
+                <h3>{t.title}</h3>
+                <div className="tcard-state">
+                  {p && p.visible ? (
+                    <span className="cells" title={`${p.done}/${p.units}칸`}>
+                      {Array.from({ length: p.units }, (_, i) => <i key={i} className={i < p.done ? "on" : ""} />)}
+                      <span className="muted small">{p.done}/{p.units}</span>
+                    </span>
+                  ) : <span className="muted small">{STATUS[t.status]}</span>}
+                </div>
+                <button className="tcard-btn" onClick={() => work(t.part)} disabled={working || done}>
+                  {done ? "완료" : working ? "진행 중…" : "이 업무 하기"}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+
+        <div className="ws-lower">
+          <section className="sheet">
+            <h2>업무 기록</h2>
+            <div className="log">
+              {workLog.length === 0 && <p className="muted small">아직 기록이 없어요. 위 업무 카드에서 &lsquo;이 업무 하기&rsquo;를 눌러 보세요.</p>}
+              {workLog.map((m) => (
+                <div key={m.id} className={`log-row ${m.sender === "candidate" ? "pick" : ""}`}>
+                  <span className="time">{m.time}</span><span>{m.content}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="sheet">
+            <h2>회사 문서</h2>
+            <p className="muted small">배경 자료예요. 업무 내용을 직접 쓸 필요는 없어요.</p>
+            <div className="doc-list">
+              {state.docs.map((d) => <button key={d.id} className="doc-row" onClick={() => openDoc(d.id)}>{d.title}</button>)}
+            </div>
+          </section>
+        </div>
+      </main>
 
       {/* 메신저 */}
-      <section className="col">
+      <aside className="messenger">
         <div className="tabs">
           {(["team", "dm", "lead_dm"] as Tab[]).map((t) => (
             <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
@@ -173,60 +227,17 @@ export default function Office({ token, onEnd }: { token: string; onEnd: () => v
           <button onClick={send} disabled={busy}>보내기</button>
         </div>
         {error && <div className="error" onClick={() => setError("")}>{error}</div>}
-      </section>
+      </aside>
 
-      {/* 업무: 업무 목록 · 업무 기록 · 작업 계속하기 */}
-      <section className="col">
-        <div className="notice small">{state.work_intro}</div>
-        <div className="panel">
-          <h2>업무 목록</h2>
-          {state.tasks.map((t) => {
-            const p = state.progress[t.part];
-            return (
-              <div className="task" key={t.part}>
-                <span>{t.part}. {t.title} <span className={`owner ${t.owner}`}>{N[t.owner]}</span></span>
-                {p && p.visible ? (
-                  <span className="cells" title={`${p.done}/${p.units}칸`}>
-                    {Array.from({ length: p.units }, (_, i) => <i key={i} className={i < p.done ? "on" : ""} />)}
-                    <span className="muted small">{p.done}/{p.units}</span>
-                  </span>
-                ) : <span className="badge">{STATUS[t.status]}</span>}
-              </div>
-            );
-          })}
-        </div>
-        <div className="panel work-panel">
-          <h2 style={{ marginBottom: 0 }}>업무 기록</h2>
-          <div className="chat">
-            {workLog.length === 0 && <div className="typing">아직 업무 기록이 없어요. 아래에 다음에 할 일을 적어 보세요.</div>}
-            {workLog.map((m) => m.sender === "candidate" ? (
-              <div key={m.id} className="memo"><span className="time">{m.time}</span> 나의 메모: {m.content}</div>
-            ) : (
-              <div key={m.id} className="narration"><span className="time">{m.time}</span> {m.content}</div>
-            ))}
+      {/* 회사 문서 보기: 가운데 창 */}
+      {doc && (
+        <div className="modal-bg" onClick={() => setDoc(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><h2>{doc.title}</h2><button className="ghost" onClick={() => setDoc(null)}>닫기</button></div>
+            <div className="modal-body"><DocBody text={doc.body} /></div>
           </div>
-          <div className="composer">
-            <textarea rows={2} value={memo} maxLength={state.memo_max_chars}
-              onChange={(e) => setMemo(e.target.value)}
-              placeholder={`다음 몇 분 동안 무엇을 할지 짧게 적어 주세요 (${state.memo_max_chars}자 이내)`} />
-            <button onClick={work} disabled={working || !memo.trim()}>작업 계속하기</button>
-          </div>
-          <span className="muted small">{memo.length}/{state.memo_max_chars}자 · 누르면 적은 업무 하나가 한 칸 오르고 시간이 몇 분 넘어가요</span>
         </div>
-      </section>
-
-      {/* 회사 문서 */}
-      <section className="col">
-        <div className="panel">
-          <h2>회사 문서</h2>
-          <span className="muted small">배경 자료예요. 업무 내용을 직접 쓸 필요는 없어요.</span>
-          <div className="doc-chips" style={{ marginTop: 8 }}>
-            {state.docs.map((d) => <button key={d.id} className="chip" onClick={() => openDoc(d.id)}>{d.title}</button>)}
-          </div>
-          {doc && <div className="doc-body"><div className="row" style={{ justifyContent: "space-between" }}><b>{doc.title}</b>
-            <button className="ghost" onClick={() => setDoc(null)}>닫기</button></div>{doc.body}</div>}
-        </div>
-      </section>
+      )}
     </div>
   );
 }
@@ -236,7 +247,35 @@ function Bubble({ m, names, initials }: { m: Msg; names: Record<string, string>;
   return (
     <div className={`bubble-row ${mine ? "mine" : ""}`}>
       <span className={`avatar ${m.sender}`}>{initials[m.sender] ?? "?"}</span>
-      <div className="bubble"><span className="meta">{mine ? "" : `${names[m.sender]} · `}{m.time}</span>{m.content}</div>
+      <div className="bubble"><span className="meta"><b>{mine ? "나" : names[m.sender]}</b><span className="ts">{m.time}</span></span>{m.content}</div>
     </div>
   );
+}
+
+// 회사 문서(마크다운)를 읽기 좋게 보여 준다. 쓰는 문법만(제목 · 목록 · 굵게 · 표) 다루고 라이브러리는 쓰지 않는다.
+function inline(s: string) {
+  return s.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") ? <b key={i}>{part.slice(2, -2)}</b> : part);
+}
+
+function DocBody({ text }: { text: string }) {
+  const out: React.ReactNode[] = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith("|")) {   // 표: 연속된 | 줄을 모은다(두 번째 줄은 구분선)
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].startsWith("|")) {
+        if (!/^\|[\s|:-]+\|$/.test(lines[i])) rows.push(lines[i].split("|").slice(1, -1).map((c) => c.trim()));
+        i++;
+      }
+      i--;
+      out.push(<table key={i} className="doc-table"><thead><tr>{rows[0].map((c, j) => <th key={j}>{inline(c)}</th>)}</tr></thead>
+        <tbody>{rows.slice(1).map((r, k) => <tr key={k}>{r.map((c, j) => <td key={j}>{inline(c)}</td>)}</tr>)}</tbody></table>);
+    } else if (line.startsWith("# ")) out.push(<h3 key={i} className="doc-h1">{inline(line.slice(2))}</h3>);
+    else if (line.startsWith("## ") || line.startsWith("### ")) out.push(<h4 key={i} className="doc-h2">{inline(line.replace(/^#+ /, ""))}</h4>);
+    else if (/^(- |\d+\. )/.test(line)) out.push(<div key={i} className="doc-li">{inline(line)}</div>);
+    else if (line.trim()) out.push(<p key={i}>{inline(line)}</p>);
+  }
+  return <>{out}</>;
 }

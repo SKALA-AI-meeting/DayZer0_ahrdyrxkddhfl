@@ -40,7 +40,7 @@ export default function DocAdmin() {
   return (
     <div className="card">
       <h2>회사 문서 관리</h2>
-      <p className="muted">문서를 추가하거나 같은 문서 id로 교체할 수 있습니다. 승인한 뒤에만 AI 동료와 AI 어시스턴트가 참고합니다. 이메일·전화번호는 자동으로 가립니다.</p>
+      <p className="muted">문서를 추가하거나 같은 문서 id로 교체할 수 있습니다. 승인한 뒤에만 AI 동료·팀장이 참고합니다. 이메일·전화번호는 자동으로 가립니다.</p>
       <p className="muted">현재 문서: {docs.map((d) => `${d.title}(${d.id}${d.source === "company" ? ", 등록" : ""})`).join(" · ")}</p>
       <form onSubmit={submit} style={{ display: "grid", gap: 6 }}>
         <div className="row">

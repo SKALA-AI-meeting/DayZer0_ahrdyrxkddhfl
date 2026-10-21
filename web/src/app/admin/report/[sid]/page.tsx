@@ -116,7 +116,7 @@ export default function ReportPage() {
           {data.report.progress && (
             <div className="card">
               <h2>업무 진척 (세션 종료 시점)</h2>
-              <p className="muted small">"작업 계속하기"로 쌓인 칸을 코드가 센 사실이에요. <b>평가 항목이 아니에요</b>(업무 실력이나 속도를 보지 않음). 보고 내용이 실제와 같은지 볼 때만 쓰세요.</p>
+              <p className="muted small">"이 업무 하기"로 쌓인 칸을 코드가 센 사실이에요. <b>평가 항목이 아니에요</b>(업무 실력이나 속도를 보지 않음). 보고 내용이 실제와 같은지 볼 때만 쓰세요.</p>
               <table>
                 <thead><tr><th>업무</th><th>담당</th><th>진척</th></tr></thead>
                 <tbody>{data.report.progress.map((p) => (
@@ -128,7 +128,7 @@ export default function ReportPage() {
           {data.report.memos && data.report.memos.length > 0 && (
             <div className="card">
               <h2>업무 메모</h2>
-              <p className="muted small">지원자가 "작업 계속하기"에 적은 메모와 분류(지문을 고르는 데만 쓰며 판단이 아닙니다).</p>
+              <p className="muted small">지원자가 "이 업무 하기"로 고른 업무와 분류(내 업무 / 동료 업무 메우기, 판단이 아닙니다).</p>
               <table>
                 <thead><tr><th>시각</th><th>메모</th><th>분류</th><th>진행한 업무</th></tr></thead>
                 <tbody>{data.report.memos.map((m) => (
