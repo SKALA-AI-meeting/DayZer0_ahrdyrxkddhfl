@@ -91,7 +91,7 @@ cd web && npm run dev                      # http://localhost:3000
 | 7 | rag-mcp → 벡터 색인 | 공개 시각이 지난 문서만 코사인 유사도 검색, 임베딩 실패 시 키워드 검색 | SQL + 임베딩 |
 | 8 | gateway → 화면 | 2초 poll로 새 메시지·진척·에이전트 진행 표시(`/agent/progress` 중계) | REST |
 
-주황 화살표는 gateway가 에이전트를 거치지 않고 MCP를 부르는 두 경로입니다(업무 카드 진척 `update_task_status`, 문서 원문 `docs://` Resource). gateway의 인증·세션 상태는 SQLite에 직접 씁니다.
+청록 점선 화살표는 gateway가 에이전트를 거치지 않고 MCP를 부르는 두 경로입니다(업무 카드 진척 `update_task_status`, 문서 원문 `docs://` Resource). gateway의 인증·세션 상태는 SQLite에 직접 씁니다.
 
 | 계층 | 하는 일 | 하지 않는 일 (교안 금지 사항, 테스트로 검사) |
 |---|---|---|

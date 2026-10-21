@@ -1,160 +1,168 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 860" width="1120" height="860" font-family="-apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 870" width="1160" height="870" font-family="-apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif">
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker>
-    <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0e7490"/></marker>
     <style>
-      .t{font-size:14px;font-weight:700;fill:#111827}
-      .s{font-size:11px;fill:#4b5563}
-      .l{font-size:11px;fill:#374151}
+      .t{font-size:14px;font-weight:700;fill:#0f172a}
+      .h{font-size:13px;font-weight:700;fill:#ffffff}
+      .hs{font-size:11px;fill:#cbd5e1}
+      .s{font-size:11px;fill:#475569}
+      .l{font-size:11px;fill:#334155}
+      .lb{font-size:11px;fill:#0e7490}
       .n{font-size:11px;font-weight:700;fill:#fff}
-      .line{stroke:#374151;stroke-width:1.4;fill:none}
-      .ex{stroke:#d97706;stroke-width:1.4;fill:none}
-      .dot{stroke:#6b7280;stroke-width:1.2;fill:none;stroke-dasharray:4 3}
+      .line{stroke:#334155;stroke-width:1.4;fill:none}
+      .dir{stroke:#0e7490;stroke-width:1.4;fill:none;stroke-dasharray:7 4}
+      .dot{stroke:#94a3b8;stroke-width:1.3;fill:none;stroke-dasharray:2 3}
+      .card{fill:#ffffff;stroke:#cbd5e1}
     </style>
   </defs>
-  <rect width="1120" height="860" fill="#ffffff"/>
+  <rect width="1160" height="870" fill="#f8fafc"/>
 
   <!-- 화면 -->
-  <rect x="400" y="20" width="300" height="64" rx="8" fill="#e8f5ec" stroke="#2f855a" stroke-width="1.5"/>
-  <circle cx="414" cy="31" r="2.5" fill="#2f855a"/><circle cx="423" cy="31" r="2.5" fill="#2f855a"/><circle cx="432" cy="31" r="2.5" fill="#2f855a"/>
-  <text x="550" y="50" text-anchor="middle" class="t">화면 · Next.js :3000</text>
-  <text x="550" y="70" text-anchor="middle" class="s">지원자 가상 오피스 /invite/[token] · 관리자 /admin</text>
+  <rect x="395" y="18" width="310" height="66" rx="10" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+  <rect x="395" y="18" width="6" height="66" rx="3" fill="#0e7490"/>
+  <text x="553" y="46" text-anchor="middle" class="t">화면 · Next.js :3000</text>
+  <text x="553" y="66" text-anchor="middle" class="s">지원자 가상 오피스 /invite/[token] · 관리자 /admin</text>
 
   <!-- 1, 8 -->
-  <path d="M520,84 L520,128" class="line" marker-end="url(#a)"/>
-  <circle cx="506" cy="104" r="8" fill="#2563eb"/><text x="506" y="108" text-anchor="middle" class="n">1</text>
+  <path d="M523,84 L523,126" class="line" marker-end="url(#a)"/>
+  <rect x="500" y="96" width="16" height="16" rx="3" fill="#0e7490"/><text x="508" y="108" text-anchor="middle" class="n">1</text>
   <text x="494" y="108" text-anchor="end" class="l">REST /api 프록시</text>
-  <path d="M580,128 L580,86" class="line" marker-end="url(#a)"/>
-  <circle cx="594" cy="104" r="8" fill="#2563eb"/><text x="594" y="108" text-anchor="middle" class="n">8</text>
-  <text x="606" y="108" class="l">2초 poll · 새 메시지 · 진행 표시</text>
+  <path d="M583,126 L583,86" class="line" marker-end="url(#a)"/>
+  <rect x="590" y="96" width="16" height="16" rx="3" fill="#0e7490"/><text x="598" y="108" text-anchor="middle" class="n">8</text>
+  <text x="612" y="108" class="l">2초 poll · 새 메시지 · 진행 표시</text>
 
   <!-- gateway -->
-  <rect x="190" y="130" width="720" height="140" rx="8" fill="#fdf2f2" stroke="#c53030" stroke-width="1.5"/>
-  <text x="206" y="152" class="t">gateway · FastAPI :8000</text>
-  <text x="894" y="152" text-anchor="end" class="s">LLM 호출 없음 · 업무 규칙 · DB 쓰기</text>
-  <rect x="206" y="166" width="210" height="88" rx="6" fill="#fff" stroke="#c53030"/>
-  <text x="311" y="194" text-anchor="middle" class="t">업무 API · 인증</text>
-  <text x="311" y="214" text-anchor="middle" class="s">api.py · auth.py</text>
-  <text x="311" y="230" text-anchor="middle" class="s">비밀번호 해시 · 서명 토큰</text>
-  <text x="311" y="246" text-anchor="middle" class="s">초대 토큰 72시간 · 기업별 분리</text>
-  <rect x="428" y="166" width="250" height="88" rx="6" fill="#fff" stroke="#c53030"/>
-  <text x="553" y="194" text-anchor="middle" class="t">세션 엔진</text>
-  <text x="553" y="214" text-anchor="middle" class="s">engine.py · clock.py · work.py</text>
-  <text x="553" y="230" text-anchor="middle" class="s">활성 시간 시계 · 장면 1회 실행</text>
-  <text x="553" y="246" text-anchor="middle" class="s">업무 칸 진척 · 고정 지문</text>
-  <rect x="690" y="166" width="204" height="88" rx="6" fill="#fff" stroke="#c53030"/>
-  <text x="792" y="194" text-anchor="middle" class="t">agent_client.py</text>
-  <text x="792" y="214" text-anchor="middle" class="s">에이전트 호출 창구 하나</text>
-  <text x="792" y="230" text-anchor="middle" class="s">HTTP(실행) · 같은 프로세스(테스트)</text>
-  <text x="792" y="246" text-anchor="middle" class="s">config [agent] mode</text>
+  <rect x="190" y="128" width="720" height="146" rx="10" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+  <path d="M190,138 a10,10 0 0,1 10,-10 h700 a10,10 0 0,1 10,10 v20 h-720 z" fill="#0f172a"/>
+  <text x="204" y="152" class="h">gateway · FastAPI :8000</text>
+  <text x="896" y="152" text-anchor="end" class="hs">LLM 호출 없음 · 업무 규칙 · DB 쓰기</text>
+  <rect x="206" y="170" width="230" height="90" rx="6" class="card"/>
+  <text x="321" y="196" text-anchor="middle" class="t">세션 엔진</text>
+  <text x="321" y="215" text-anchor="middle" class="s">engine.py · clock.py · work.py</text>
+  <text x="321" y="231" text-anchor="middle" class="s">활성 시간 시계 · 장면 1회 실행</text>
+  <text x="321" y="247" text-anchor="middle" class="s">업무 칸 진척 · 고정 지문</text>
+  <rect x="448" y="170" width="210" height="90" rx="6" class="card"/>
+  <text x="553" y="196" text-anchor="middle" class="t">agent_client.py</text>
+  <text x="553" y="215" text-anchor="middle" class="s">에이전트 호출 창구 하나</text>
+  <text x="553" y="231" text-anchor="middle" class="s">HTTP(실행) · 같은 프로세스(테스트)</text>
+  <text x="553" y="247" text-anchor="middle" class="s">config [agent] mode</text>
+  <rect x="670" y="170" width="224" height="90" rx="6" class="card"/>
+  <text x="782" y="196" text-anchor="middle" class="t">업무 API · 인증</text>
+  <text x="782" y="215" text-anchor="middle" class="s">api.py · auth.py</text>
+  <text x="782" y="231" text-anchor="middle" class="s">비밀번호 해시 · 서명 토큰</text>
+  <text x="782" y="247" text-anchor="middle" class="s">초대 토큰 72시간 · 기업별 분리</text>
 
   <!-- 2 -->
-  <path d="M792,270 L792,318" class="line" marker-end="url(#a)"/>
-  <circle cx="806" cy="294" r="8" fill="#2563eb"/><text x="806" y="298" text-anchor="middle" class="n">2</text>
-  <text x="818" y="298" class="l">HTTP /agent/turn · reports · docs</text>
+  <path d="M553,274 L553,320" class="line" marker-end="url(#a)"/>
+  <rect x="561" y="288" width="16" height="16" rx="3" fill="#0e7490"/><text x="569" y="300" text-anchor="middle" class="n">2</text>
+  <text x="583" y="300" class="l">HTTP /agent/turn · reports · docs</text>
 
   <!-- agent -->
-  <rect x="190" y="320" width="720" height="150" rx="8" fill="#f3f0ff" stroke="#6b46c1" stroke-width="2"/>
-  <text x="206" y="342" class="t">에이전트 서버 · FastAPI + LangGraph :8001</text>
-  <text x="894" y="342" text-anchor="end" class="s">DB 직접 쓰기 없음 · 판별 캐시만 자기 상태</text>
-  <rect x="206" y="356" width="166" height="98" rx="6" fill="#fff" stroke="#6b46c1"/>
-  <text x="289" y="382" text-anchor="middle" class="t">세션 Graph</text>
-  <text x="289" y="402" text-anchor="middle" class="s">graph.py</text>
-  <text x="289" y="418" text-anchor="middle" class="s">장면 · 분업 협상</text>
-  <text x="289" y="434" text-anchor="middle" class="s">답장 라우팅 · 후속 반응</text>
-  <rect x="384" y="356" width="166" height="98" rx="6" fill="#fff" stroke="#6b46c1"/>
-  <text x="467" y="382" text-anchor="middle" class="t">발화 Graph</text>
-  <text x="467" y="402" text-anchor="middle" class="s">speak_graph.py · persona.py</text>
-  <text x="467" y="418" text-anchor="middle" class="s">생성 → 문서 도구 → 코드 검증</text>
-  <text x="467" y="434" text-anchor="middle" class="s">재생성 · 대체 문장</text>
-  <rect x="562" y="356" width="166" height="98" rx="6" fill="#fff" stroke="#6b46c1"/>
-  <text x="645" y="382" text-anchor="middle" class="t">관찰 · 리포트</text>
-  <text x="645" y="402" text-anchor="middle" class="s">observe.py · report.py</text>
-  <text x="645" y="418" text-anchor="middle" class="s">판별 → 인용·채널·함의 검증</text>
-  <text x="645" y="434" text-anchor="middle" class="s">규칙 등급 A~E · 근거</text>
-  <rect x="740" y="356" width="154" height="98" rx="6" fill="#fff" stroke="#6b46c1"/>
-  <text x="817" y="382" text-anchor="middle" class="t">문서 등록 Graph</text>
-  <text x="817" y="402" text-anchor="middle" class="s">doc_graph.py</text>
-  <text x="817" y="418" text-anchor="middle" class="s">개인정보 마스킹</text>
-  <text x="817" y="434" text-anchor="middle" class="s">interrupt 승인 → 등록</text>
+  <rect x="190" y="322" width="720" height="152" rx="10" fill="#ffffff" stroke="#0e7490" stroke-width="1.8"/>
+  <path d="M190,332 a10,10 0 0,1 10,-10 h700 a10,10 0 0,1 10,10 v20 h-720 z" fill="#0e7490"/>
+  <text x="204" y="346" class="h">에이전트 서버 · FastAPI + LangGraph :8001</text>
+  <text x="896" y="346" text-anchor="end" class="hs" style="fill:#cffafe">DB 직접 쓰기 없음 · 판별 캐시만 자기 상태</text>
+  <rect x="206" y="364" width="166" height="96" rx="6" class="card"/>
+  <text x="289" y="389" text-anchor="middle" class="t">세션 Graph</text>
+  <text x="289" y="408" text-anchor="middle" class="s">graph.py</text>
+  <text x="289" y="424" text-anchor="middle" class="s">장면 · 분업 협상</text>
+  <text x="289" y="440" text-anchor="middle" class="s">답장 라우팅 · 후속 반응</text>
+  <rect x="384" y="364" width="166" height="96" rx="6" class="card"/>
+  <text x="467" y="389" text-anchor="middle" class="t">발화 Graph</text>
+  <text x="467" y="408" text-anchor="middle" class="s">speak_graph.py · persona.py</text>
+  <text x="467" y="424" text-anchor="middle" class="s">생성 → 문서 도구 → 코드 검증</text>
+  <text x="467" y="440" text-anchor="middle" class="s">재생성 · 대체 문장</text>
+  <rect x="562" y="364" width="166" height="96" rx="6" class="card"/>
+  <text x="645" y="389" text-anchor="middle" class="t">관찰 · 리포트</text>
+  <text x="645" y="408" text-anchor="middle" class="s">observe.py · report.py</text>
+  <text x="645" y="424" text-anchor="middle" class="s">판별 → 인용·채널·함의 검증</text>
+  <text x="645" y="440" text-anchor="middle" class="s">규칙 등급 A~E · 근거</text>
+  <rect x="740" y="364" width="154" height="96" rx="6" class="card"/>
+  <text x="817" y="389" text-anchor="middle" class="t">문서 등록 Graph</text>
+  <text x="817" y="408" text-anchor="middle" class="s">doc_graph.py</text>
+  <text x="817" y="424" text-anchor="middle" class="s">개인정보 마스킹</text>
+  <text x="817" y="440" text-anchor="middle" class="s">interrupt 승인 → 등록</text>
 
-  <!-- OpenAI / LangSmith clouds -->
-  <path d="M960,350 q0,-22 26,-22 q8,-16 30,-12 q18,-14 40,4 q24,0 24,22 q12,14 -4,28 q-6,18 -30,14 q-16,12 -36,2 q-22,8 -34,-8 q-24,-4 -16,-28 z" fill="#fff" stroke="#6b7280" stroke-dasharray="5 3"/>
-  <text x="1022" y="352" text-anchor="middle" class="t">OpenAI</text>
-  <text x="1022" y="370" text-anchor="middle" class="s">gpt-4o-mini</text>
-  <path d="M960,470 q0,-22 26,-22 q8,-16 30,-12 q18,-14 40,4 q24,0 24,22 q12,14 -4,28 q-6,18 -30,14 q-16,12 -36,2 q-22,8 -34,-8 q-24,-4 -16,-28 z" fill="#fff" stroke="#6b7280" stroke-dasharray="5 3"/>
-  <text x="1022" y="472" text-anchor="middle" class="t">LangSmith</text>
-  <text x="1022" y="490" text-anchor="middle" class="s">+ data/trace.jsonl</text>
+  <!-- 외부 서비스 칸 -->
+  <rect x="990" y="300" width="150" height="250" rx="10" fill="none" stroke="#94a3b8" stroke-dasharray="6 4"/>
+  <text x="1065" y="320" text-anchor="middle" class="s" style="font-weight:700">외부 서비스</text>
+  <rect x="1004" y="334" width="122" height="62" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="1065" y="360" text-anchor="middle" class="t">OpenAI</text>
+  <text x="1065" y="379" text-anchor="middle" class="s">gpt-4o-mini · 임베딩</text>
+  <rect x="1004" y="410" width="122" height="62" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="1065" y="436" text-anchor="middle" class="t">LangSmith</text>
+  <text x="1065" y="455" text-anchor="middle" class="s">+ data/trace.jsonl</text>
   <!-- 3 -->
-  <path d="M910,365 L956,358" class="line" marker-end="url(#a)"/>
-  <circle cx="932" cy="348" r="8" fill="#2563eb"/><text x="932" y="352" text-anchor="middle" class="n">3</text>
-  <path d="M910,440 L956,470" class="dot" marker-end="url(#a)"/>
+  <path d="M910,365 L1002,365" class="line" marker-end="url(#a)"/>
+  <rect x="964" y="345" width="16" height="16" rx="3" fill="#0e7490"/><text x="972" y="357" text-anchor="middle" class="n">3</text>
+  <path d="M910,441 L1002,441" class="dot" marker-end="url(#a)"/>
+  <text x="972" y="456" text-anchor="middle" class="s">기록</text>
 
   <!-- 4, 5 -->
-  <path d="M289,470 L289,548" class="line" marker-end="url(#a)"/>
-  <path d="M645,470 L645,520 L330,520 L330,548" class="line" marker-end="url(#a)"/>
-  <circle cx="275" cy="510" r="8" fill="#2563eb"/><text x="275" y="514" text-anchor="middle" class="n">4</text>
-  <text x="263" y="514" text-anchor="end" class="l">MCP · 발화·분업·관찰·리포트 저장</text>
-  <path d="M467,470 L467,500 L700,500 L700,548" class="line" marker-end="url(#a)"/>
-  <path d="M817,470 L817,500 L720,500" class="line"/>
-  <circle cx="714" cy="532" r="8" fill="#2563eb"/><text x="714" y="536" text-anchor="middle" class="n">5</text>
-  <text x="726" y="536" class="l">MCP · 문서 검색 · 승인 후 등록</text>
+  <path d="M289,474 L289,554" class="line" marker-end="url(#a)"/>
+  <path d="M645,474 L645,522 L340,522 L340,554" class="line" marker-end="url(#a)"/>
+  <rect x="267" y="508" width="16" height="16" rx="3" fill="#0e7490"/><text x="275" y="520" text-anchor="middle" class="n">4</text>
+  <text x="261" y="520" text-anchor="end" class="l">MCP · 발화·분업·관찰·리포트 저장</text>
+  <path d="M467,474 L467,502 L705,502 L705,554" class="line" marker-end="url(#a)"/>
+  <path d="M817,474 L817,502 L705,502" class="line"/>
+  <rect x="713" y="528" width="16" height="16" rx="3" fill="#0e7490"/><text x="721" y="540" text-anchor="middle" class="n">5</text>
+  <text x="735" y="540" class="l">MCP · 문서 검색 · 승인 후 등록</text>
 
-  <!-- MCP hexagons -->
-  <path d="M190,590 L216,550 L414,550 L440,590 L414,630 L216,630 z" fill="#eaf1fd" stroke="#2b6cb0" stroke-width="1.5"/>
-  <text x="315" y="578" text-anchor="middle" class="t">business-mcp :9101</text>
-  <text x="315" y="597" text-anchor="middle" class="s">조회 4 · 변경 11 · Streamable HTTP</text>
-  <text x="315" y="613" text-anchor="middle" class="s">값 검사만, 업무 규칙 없음</text>
-  <path d="M580,590 L606,550 L804,550 L830,590 L804,630 L606,630 z" fill="#eaf1fd" stroke="#2b6cb0" stroke-width="1.5"/>
-  <text x="705" y="578" text-anchor="middle" class="t">rag-mcp :9102</text>
-  <text x="705" y="597" text-anchor="middle" class="s">조회 3 · 변경 1(승인 토큰) · Resource 2</text>
-  <text x="705" y="613" text-anchor="middle" class="s">공개 시각 지난 문서만</text>
+  <!-- MCP -->
+  <rect x="190" y="556" width="250" height="76" rx="8" fill="#ffffff" stroke="#334155"/>
+  <rect x="190" y="556" width="8" height="76" rx="3" fill="#334155"/>
+  <text x="319" y="582" text-anchor="middle" class="t">business-mcp :9101</text>
+  <text x="319" y="601" text-anchor="middle" class="s">조회 4 · 변경 11 · Streamable HTTP</text>
+  <text x="319" y="617" text-anchor="middle" class="s">값 검사만, 업무 규칙 없음</text>
+  <rect x="580" y="556" width="250" height="76" rx="8" fill="#ffffff" stroke="#334155"/>
+  <rect x="580" y="556" width="8" height="76" rx="3" fill="#334155"/>
+  <text x="709" y="582" text-anchor="middle" class="t">rag-mcp :9102</text>
+  <text x="709" y="601" text-anchor="middle" class="s">조회 3 · 변경 1(승인 토큰) · Resource 2</text>
+  <text x="709" y="617" text-anchor="middle" class="s">공개 시각 지난 문서만</text>
 
-  <!-- gateway direct calls (orange) -->
-  <path d="M206,240 L150,240 L150,590 L188,590" class="ex" marker-end="url(#o)"/>
-  <text x="156" y="300" class="l" fill="#b45309">업무 카드 진척</text>
-  <path d="M894,250 L940,250 L940,610 L832,610" class="ex" marker-end="url(#o)"/>
-  <text x="946" y="600" class="l" fill="#b45309">문서 원문 docs://</text>
+  <!-- gateway 직접 호출 -->
+  <path d="M206,240 L150,240 L150,594 L188,594" class="dir" marker-end="url(#b)"/>
+  <text x="156" y="300" class="lb">업무 카드 진척</text>
+  <path d="M894,240 L950,240 L950,612 L832,612" class="dir" marker-end="url(#b)"/>
+  <text x="944" y="290" text-anchor="end" class="lb">문서 원문</text>
+  <text x="944" y="305" text-anchor="end" class="lb">docs://</text>
   <!-- gateway → SQLite -->
-  <path d="M206,200 L100,200 L100,740 L188,740" class="line" marker-end="url(#a)"/>
+  <path d="M206,200 L100,200 L100,746 L188,746" class="line" marker-end="url(#a)"/>
   <text x="94" y="640" text-anchor="end" class="l">SQL</text>
   <text x="94" y="656" text-anchor="end" class="l">인증·세션</text>
 
   <!-- 6, 7 -->
-  <path d="M315,630 L315,698" class="line" marker-end="url(#a)"/>
-  <circle cx="301" cy="664" r="8" fill="#2563eb"/><text x="301" y="668" text-anchor="middle" class="n">6</text>
-  <text x="327" y="668" class="l">값 검사 후 저장</text>
-  <path d="M705,630 L705,698" class="line" marker-end="url(#a)"/>
-  <circle cx="691" cy="664" r="8" fill="#2563eb"/><text x="691" y="668" text-anchor="middle" class="n">7</text>
-  <text x="717" y="668" class="l">벡터 검색 · 실패 시 키워드</text>
-  <path d="M830,580 Q960,560 990,392" class="dot" marker-end="url(#a)"/>
-  <text x="900" y="545" class="l">질의 임베딩</text>
+  <path d="M319,632 L319,704" class="line" marker-end="url(#a)"/>
+  <rect x="297" y="660" width="16" height="16" rx="3" fill="#0e7490"/><text x="305" y="672" text-anchor="middle" class="n">6</text>
+  <text x="327" y="672" class="l">값 검사 후 저장</text>
+  <path d="M709,632 L709,704" class="line" marker-end="url(#a)"/>
+  <rect x="687" y="660" width="16" height="16" rx="3" fill="#0e7490"/><text x="695" y="672" text-anchor="middle" class="n">7</text>
+  <text x="717" y="672" class="l">벡터 검색 · 실패 시 키워드</text>
+  <path d="M830,590 L1132,590 L1132,365 L1128,365" class="dot" marker-end="url(#a)"/>
+  <text x="1040" y="584" text-anchor="middle" class="s">질의 임베딩</text>
 
-  <!-- data cylinders -->
-  <path d="M190,712 a250,14 0 0,0 500,0 a250,14 0 0,0 -500,0 z" fill="#f3f4f6" stroke="#4b5563"/>
-  <path d="M190,712 L190,786 a250,14 0 0,0 500,0 L690,712" fill="#f3f4f6" stroke="#4b5563"/>
-  <text x="440" y="745" text-anchor="middle" class="t">SQLite · data/dayzero.sqlite3</text>
-  <text x="440" y="764" text-anchor="middle" class="s">sessions · messages · tasks · scene_runs · work_memos</text>
-  <text x="440" y="780" text-anchor="middle" class="s">observations · reports · judge_cache · admins · company_docs</text>
-  <path d="M600,712" fill="none"/>
-  <path d="M610,712" fill="none"/>
-  <path d="M620,712 a0,0 0 0,0 0,0" fill="none"/>
-  <path d="M706,712 a100,12 0 0,0 200,0 a100,12 0 0,0 -200,0 z" fill="#f3f4f6" stroke="#4b5563"/>
-  <path d="M706,712 L706,780 a100,12 0 0,0 200,0 L906,712" fill="#f3f4f6" stroke="#4b5563"/>
-  <text x="806" y="745" text-anchor="middle" class="t">벡터 색인</text>
-  <text x="806" y="764" text-anchor="middle" class="s">doc_chunks · query_embeddings</text>
-  <text x="806" y="780" text-anchor="middle" class="s">코사인 유사도</text>
+  <!-- 저장소 -->
+  <path d="M190,718 a250,14 0 0,0 500,0 a250,14 0 0,0 -500,0 z" fill="#e2e8f0" stroke="#475569"/>
+  <path d="M190,718 L190,792 a250,14 0 0,0 500,0 L690,718" fill="#e2e8f0" stroke="#475569"/>
+  <text x="440" y="751" text-anchor="middle" class="t">SQLite · data/dayzero.sqlite3</text>
+  <text x="440" y="770" text-anchor="middle" class="s">sessions · messages · tasks · scene_runs · work_memos</text>
+  <text x="440" y="786" text-anchor="middle" class="s">observations · reports · judge_cache · admins · company_docs</text>
+  <path d="M710,718 a100,12 0 0,0 200,0 a100,12 0 0,0 -200,0 z" fill="#e2e8f0" stroke="#475569"/>
+  <path d="M710,718 L710,786 a100,12 0 0,0 200,0 L910,718" fill="#e2e8f0" stroke="#475569"/>
+  <text x="810" y="751" text-anchor="middle" class="t">벡터 색인</text>
+  <text x="810" y="770" text-anchor="middle" class="s">doc_chunks · query_embeddings</text>
+  <text x="810" y="786" text-anchor="middle" class="s">코사인 유사도</text>
 
-  <!-- legend -->
-  <rect x="20" y="814" width="1080" height="34" rx="6" fill="#f9fafb" stroke="#e5e7eb"/>
-  <rect x="34" y="824" width="22" height="14" rx="3" fill="#e8f5ec" stroke="#2f855a"/><text x="62" y="835" class="l">화면</text>
-  <rect x="104" y="824" width="22" height="14" rx="3" fill="#fdf2f2" stroke="#c53030"/><text x="132" y="835" class="l">gateway 구성 요소</text>
-  <rect x="236" y="824" width="22" height="14" rx="3" fill="#f3f0ff" stroke="#6b46c1"/><text x="264" y="835" class="l">Agent 코어</text>
-  <path d="M342,831 L347,824 L361,824 L366,831 L361,838 L347,838 z" fill="#eaf1fd" stroke="#2b6cb0"/><text x="372" y="835" class="l">MCP 서버</text>
-  <rect x="440" y="824" width="22" height="14" rx="7" fill="#f3f4f6" stroke="#4b5563"/><text x="468" y="835" class="l">저장소</text>
-  <rect x="520" y="824" width="22" height="14" rx="7" fill="#fff" stroke="#6b7280" stroke-dasharray="4 2"/><text x="548" y="835" class="l">외부 서비스</text>
-  <path d="M620,831 L650,831" class="line" marker-end="url(#a)"/><text x="656" y="835" class="l">호출</text>
-  <path d="M700,831 L730,831" class="dot" marker-end="url(#a)"/><text x="736" y="835" class="l">LLM · 기록</text>
-  <path d="M806,831 L836,831" class="ex" marker-end="url(#o)"/><text x="842" y="835" class="l">gateway의 직접 MCP 호출</text>
-  <circle cx="1000" cy="831" r="8" fill="#2563eb"/><text x="1000" y="835" text-anchor="middle" class="n">1</text><text x="1014" y="835" class="l">처리 순서</text>
+  <!-- 범례 -->
+  <line x1="20" y1="822" x2="1140" y2="822" stroke="#e2e8f0"/>
+  <rect x="24" y="836" width="22" height="14" rx="3" fill="#0f172a"/><text x="52" y="847" class="l">업무 서버 (규칙)</text>
+  <rect x="150" y="836" width="22" height="14" rx="3" fill="#0e7490"/><text x="178" y="847" class="l">AI 에이전트</text>
+  <rect x="262" y="836" width="22" height="14" rx="3" fill="#fff" stroke="#334155"/><rect x="262" y="836" width="5" height="14" fill="#334155"/><text x="290" y="847" class="l">MCP 서버</text>
+  <rect x="362" y="836" width="22" height="14" rx="7" fill="#e2e8f0" stroke="#475569"/><text x="390" y="847" class="l">저장소</text>
+  <rect x="440" y="836" width="22" height="14" rx="3" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="3 2"/><text x="468" y="847" class="l">외부 서비스</text>
+  <path d="M552,843 L582,843" class="line" marker-end="url(#a)"/><text x="588" y="847" class="l">호출</text>
+  <path d="M630,843 L660,843" class="dot" marker-end="url(#a)"/><text x="666" y="847" class="l">기록 · 임베딩</text>
+  <path d="M800,843 L830,843" class="dir" marker-end="url(#b)"/><text x="836" y="847" class="l">gateway가 에이전트를 거치지 않는 호출</text>
+  <rect x="1060" y="836" width="16" height="16" rx="3" fill="#0e7490"/><text x="1068" y="848" text-anchor="middle" class="n">1</text><text x="1082" y="847" class="l">처리 순서</text>
 </svg>
